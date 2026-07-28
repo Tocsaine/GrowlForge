@@ -1,12 +1,10 @@
 cmake_minimum_required(VERSION 3.24)
-project(GrowlForge VERSION 1.0.1 LANGUAGES CXX)
+project(GrowlForge VERSION 1.1.0 LANGUAGES CXX)
 
-# GrowlForge is a 64-bit plug-in on Windows. Fail early with one useful
-# diagnostic instead of allowing MSVC to mix x86 and x64 runtime libraries.
 if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR
     "GrowlForge must be built for x64. "
-    "Delete the out directory and use the windows-x64-release preset.")
+    "Delete the out directory and use a windows-x64 preset.")
 endif()
 
 message(STATUS "GrowlForge generator: ${CMAKE_GENERATOR}")
@@ -22,17 +20,9 @@ target_include_directories(GrowlForge PRIVATE
 
 if(MSVC)
   target_compile_options(GrowlForge PRIVATE /W4 /permissive- /EHsc /utf-8)
-  target_compile_definitions(GrowlForge PRIVATE
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-  )
+  target_compile_definitions(GrowlForge PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
 else()
-  target_compile_options(GrowlForge PRIVATE
-    -Wall
-    -Wextra
-    -Wpedantic
-    -fvisibility=hidden
-  )
+  target_compile_options(GrowlForge PRIVATE -Wall -Wextra -Wpedantic -fvisibility=hidden)
 endif()
 
 set_target_properties(GrowlForge PROPERTIES
@@ -43,8 +33,6 @@ set_target_properties(GrowlForge PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins"
 )
 
-# Keep multi-config generators such as Visual Studio from inserting another
-# Release/Debug directory below plugins.
 foreach(config Debug Release RelWithDebInfo MinSizeRel)
   string(TOUPPER "${config}" config_upper)
   set_target_properties(GrowlForge PROPERTIES

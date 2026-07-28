@@ -1,9 +1,6 @@
-# Build output
 GrowlForge_Full/out/
 GrowlForge_Full/.vs/
 GrowlForge_Full/CMakeUserPresets.json
-
-# IDE and OS noise
 .vs/
 .idea/
 .vscode/

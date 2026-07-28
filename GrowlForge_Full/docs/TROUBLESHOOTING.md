@@ -1,8 +1,29 @@
-# Troubleshooting
+# Troubleshooting GrowlForge 1.1.0
 
-## `library machine type x86 conflicts with target x64`
+## Too much high-frequency fizz
 
-This means an old or incorrectly configured build directory is being reused.
+Start with:
+
+```text
+Smooth: 7.0
+Pre-Cab Filter: 3.0
+Air: 1.5
+Presence: 3.5
+Bite: 4.0
+```
+
+Then inspect the amp sim. GrowlForge now suppresses nonlinear aliasing internally, but it cannot remove aliasing already generated upstream by another plug-in.
+
+## Output is still too loud
+
+Use the controls in this order:
+
+1. Set `Input Trim` so bypass and enabled levels are comparable.
+2. Set `Output` for chain gain staging.
+3. Keep `Ceiling` between `-2 dB` and `-1 dB`.
+4. Do not use the ceiling as the primary volume control.
+
+## Build error mentioning x86
 
 Run:
 
@@ -10,38 +31,6 @@ Run:
 .\build-windows.ps1 -Clean
 ```
 
-The Windows presets explicitly request x64, and CMake now stops immediately if the configured pointer size is not 8 bytes.
+## Old projects do not restore parameters
 
-## Visual Studio keeps using an old cache
-
-Close Visual Studio, then remove:
-
-```text
-out
-.vs
-```
-
-Reopen the folder and select `windows-x64-release`.
-
-## CMake cannot find `Visual Studio 18 2026`
-
-Confirm Visual Studio 2026 and its C++ workload are installed.
-
-For Visual Studio 2022 use:
-
-```powershell
-cmake --preset windows-x64-release-vs2022
-cmake --build --preset windows-x64-release-vs2022
-```
-
-## Ninja reports dirty timestamps
-
-The main Windows build no longer uses Ninja. If using `portable-release`, synchronize the system clock and delete its build directory.
-
-## Build succeeds but REAPER does not list the plug-in
-
-1. Close REAPER.
-2. Copy `GrowlForge.clap` to `%LOCALAPPDATA%\Programs\Common\CLAP`.
-3. Restart REAPER.
-4. Clear and rescan the plug-in cache.
-5. Search for `GrowlForge`.
+Version 1.1.0 changed from 10 to 18 parameters and uses a new state format. Recreate the GrowlForge settings in the project and save it again.

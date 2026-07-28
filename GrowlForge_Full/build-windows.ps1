@@ -25,30 +25,20 @@ $buildDir = if ($VisualStudio -eq "vs2022") {
 }
 
 if ($Clean -and (Test-Path $buildDir)) {
-    Write-Host "Removing stale build directory: $buildDir"
     Remove-Item -Recurse -Force $buildDir
 }
 
-Write-Host "Configuring preset: $preset"
 cmake --preset $preset
-if ($LASTEXITCODE -ne 0) {
-    throw "CMake configuration failed."
-}
+if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed." }
 
-Write-Host "Building preset: $preset"
 cmake --build --preset $preset
-if ($LASTEXITCODE -ne 0) {
-    throw "Build failed."
-}
+if ($LASTEXITCODE -ne 0) { throw "Build failed." }
 
 $plugin = Join-Path $buildDir "plugins\GrowlForge.clap"
 if (-not (Test-Path $plugin)) {
-    throw "Build completed but the expected plug-in was not found: $plugin"
+    throw "Expected plug-in not found: $plugin"
 }
 
 Write-Host ""
-Write-Host "Build succeeded."
+Write-Host "GrowlForge 1.1.0 build succeeded."
 Write-Host "Plug-in: $plugin"
-Write-Host ""
-Write-Host "Install it to:"
-Write-Host "$env:LOCALAPPDATA\Programs\Common\CLAP"
