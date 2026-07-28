@@ -1,4 +1,4 @@
-# GrowlForge 1.1.0
+# GrowlForge 1.1.1
 
 GrowlForge is a post-amplifier guitar tone sculptor for CLAP hosts.
 
@@ -8,113 +8,67 @@ Recommended chain:
 Guitar → amp sim / real amp capture → GrowlForge → cabinet / IR → final EQ
 ```
 
-## What changed in 1.1.0
+## Changes in 1.1.1
 
-- 4× oversampling around the nonlinear saturation stage.
-- Four-pole internal anti-alias filtering.
-- Additional two-pole post smoothing.
-- Lower default input and output levels for post-amp use.
-- Drive-dependent gain compensation.
-- Output ceiling control.
-- Expanded tone controls for tight, aggressive and massive guitar sounds.
-- Fixed a null-pointer ordering issue in the process callback.
-- Version bumped to 1.1.0.
+- Every tone control now has a substantially wider and more obvious range.
+- `Input Trim` default changed from `-12 dB` to `-6 dB`.
+- `Output` default changed from `-12 dB` to `0 dB`.
+- `Ceiling` remains at `-1 dB` to protect the following cabinet/IR stage.
+- Drive, Grind and Fuzz now move from subtle coloration to clearly audible destruction.
+- Tight, Punch, Body, Mass and Growl now produce much larger spectral changes.
+- Bite, Presence and Air are stronger, while oversampling and smoothing remain active.
+- Pre-Cab Filter and Smooth now cover a wider range.
 
-## Parameters
+## Control behavior
 
-### Gain and dynamics
+### Low end
 
-- **Input Trim** — level entering GrowlForge. Default is `-12 dB`.
-- **Gate** — input envelope gate.
-- **Output** — final output trim. Default is `-12 dB`.
-- **Ceiling** — smooth output ceiling. Default is `-1 dB`.
-- **Mix** — dry/wet blend.
-
-### Low end and weight
-
-- **Tight** — raises the high-pass frequency and reduces loose deep lows.
-- **Punch** — emphasizes the focused low-mid attack.
-- **Body** — adds thickness without only boosting sub-bass.
-- **Mass** — restores controlled deep weight after tightening.
+- **Tight** — dramatically removes loose low end and raises the input high-pass.
+- **Punch** — strongly emphasizes focused low-mid attack.
+- **Body** — adds broad thickness and density.
+- **Mass** — adds deep controlled weight and can substantially reshape the low end.
 
 ### Midrange and saturation
 
-- **Growl** — focused aggressive midrange.
-- **Drive** — main saturation amount.
-- **Grind** — sharper asymmetric harmonic texture.
-- **Fuzz** — restrained parallel fuzz layer.
+- **Growl** — moves from scooped/neutral to strongly forward aggressive mids.
+- **Drive** — main saturation, now with a much wider gain range.
+- **Grind** — asymmetric metallic texture and sharper odd-harmonic character.
+- **Fuzz** — parallel fuzz layer, now capable of very obvious fuzz coloration.
 
-### High-frequency character
+### High frequencies
 
-- **Bite** — upper-mid articulation.
-- **Presence** — broad high-frequency projection.
-- **Air** — restrained top-end openness.
-- **Smooth** — increases internal anti-alias damping.
-- **Pre-Cab Filter** — mild low-pass intended before a separate cabinet or IR.
+- **Bite** — strong upper-mid attack and pick definition.
+- **Presence** — broad projection and edge.
+- **Air** — top-end openness; use carefully after bright amp sims.
+- **Smooth** — stronger anti-alias and high-frequency damping.
+- **Pre-Cab Filter** — broad pre-cab low-pass range.
 
-## Starting points
-
-### Tight modern rhythm
+## Default gain staging
 
 ```text
-Input Trim  -12 dB
-Tight       7.0
-Punch       6.5
-Body        4.0
-Mass        3.5
-Growl       6.5
-Drive       2.5
-Grind       3.5
-Fuzz        0.8
-Bite        5.0
-Presence    4.0
-Air         2.0
-Smooth      7.0
-Output      -12 dB
+Input Trim  -6 dB
+Output       0 dB
 Ceiling     -1 dB
 ```
 
-### Massive wide rhythm
+`Output` is now unity by default, but `Ceiling` still catches excessive peaks. For correct comparison, level-match bypass and enabled states using `Input Trim` first.
+
+## Suggested test procedure
+
+Set all character controls to `5`, then move one control from `0` to `10` while playing the same riff. Every control should now produce an obvious change.
+
+For the strongest comparison:
 
 ```text
-Input Trim  -14 dB
-Tight       4.0
-Punch       5.0
-Body        7.0
-Mass        7.5
-Growl       5.0
-Drive       2.0
-Grind       2.0
-Fuzz        1.5
-Bite        3.5
-Presence    3.0
-Air         2.5
-Smooth      7.5
-Output      -13 dB
-Ceiling     -1 dB
+Drive / Grind / Fuzz: test separately
+Tight / Mass: compare as opposite low-end directions
+Punch / Body: compare attack versus width
+Growl: compare 0, 5 and 10
+Bite / Presence / Air: compare separately after the same cab IR
+Smooth / Pre-Cab Filter: compare at 0 and 10
 ```
 
-### Aggressive growl
-
-```text
-Input Trim  -13 dB
-Tight       6.0
-Punch       5.5
-Body        4.5
-Mass        4.5
-Growl       8.0
-Drive       3.0
-Grind       5.5
-Fuzz        1.5
-Bite        5.5
-Presence    4.5
-Air         1.5
-Smooth      7.0
-Output      -13 dB
-Ceiling     -1 dB
-```
-
-## Build on Windows
+## Build
 
 Visual Studio 2026:
 
@@ -128,12 +82,12 @@ Visual Studio 2022:
 .\build-windows.ps1 -Clean -VisualStudio vs2022
 ```
 
-The resulting plug-in is located under the selected preset's:
+The resulting file is under:
 
 ```text
 out\build\<preset>\plugins\GrowlForge.clap
 ```
 
-## Compatibility note
+## Compatibility
 
-Version 1.1.0 uses a new 18-parameter state layout. Presets or projects saved by the earlier 10-parameter prototype may need to be recreated.
+Version 1.1.1 keeps the 18-parameter state layout introduced in 1.1.0.

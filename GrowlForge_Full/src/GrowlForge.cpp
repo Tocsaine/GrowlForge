@@ -26,7 +26,7 @@ struct ParamDef {
 };
 
 constexpr std::array<ParamDef,kParamCount> defs{{
- {Input,"Input Trim","Gain",-24,12,-12," dB"},
+ {Input,"Input Trim","Gain",-24,12,-6," dB"},
  {Gate,"Gate","Dynamics",-90,-20,-65," dB"},
  {Tight,"Tight","Low End",0,10,5.5,""},
  {Punch,"Punch","Low Mids",0,10,5.0,""},
@@ -42,7 +42,7 @@ constexpr std::array<ParamDef,kParamCount> defs{{
  {Smooth,"Smooth","Anti-Alias",0,10,6.0,""},
  {PreCab,"Pre-Cab Filter","Anti-Alias",0,10,2.5,""},
  {Mix,"Mix","Output",0,100,100," %"},
- {Output,"Output","Output",-24,6,-12," dB"},
+ {Output,"Output","Output",-24,6,0," dB"},
  {Ceiling,"Ceiling","Output",-12,0,-1," dB"}
 }};
 
@@ -100,13 +100,13 @@ struct GrowlForge {
   const double smooth=p[Smooth].load();
   const double preCab=p[PreCab].load();
 
-  const double hpHz=45.0+14.0*tight;
+  const double hpHz=38.0+24.0*tight;
   const double osRate=sampleRate*kOversample;
 
   // Internal oversampling filter. Smooth raises damping without turning the
   // plug-in into a dull low-pass by itself.
   const double aaCut=clamp(
-    sampleRate*(0.42-0.012*smooth),
+    sampleRate*(0.44-0.020*smooth),
     9000.0,
     std::min(19000.0,sampleRate*0.44)
   );
@@ -114,7 +114,7 @@ struct GrowlForge {
   // Pre-cab filter is intentionally mild at low values because this plug-in
   // is designed to sit before a separate cabinet or IR loader.
   const double postCut=clamp(
-    19500.0-850.0*preCab-350.0*smooth,
+    20500.0-1250.0*preCab-430.0*smooth,
     5500.0,
     std::min(19500.0,sampleRate*0.45)
   );
@@ -136,10 +136,10 @@ struct GrowlForge {
   const double grind=p[Grind].load()/10.0;
   const double fuzz=p[Fuzz].load()/10.0;
 
-  const double pre=1.0+7.0*drive+3.5*grind;
-  const double asymPos=1.0+0.14*grind;
-  const double asymNeg=1.0-0.10*grind;
-  const double fuzzGain=4.0+28.0*fuzz;
+  const double pre=1.0+13.0*drive+7.0*grind;
+  const double asymPos=1.0+0.34*grind;
+  const double asymNeg=1.0-0.22*grind;
+  const double fuzzGain=5.0+58.0*fuzz;
 
   float out=0.0f;
   const float start=c.previousShaped;
@@ -149,11 +149,11 @@ struct GrowlForge {
 
    const double mainSat=std::tanh(u*pre*(u>=0.0f?asymPos:asymNeg));
    const double fuzzSat=std::tanh(u*fuzzGain);
-   const double fuzzMix=0.28*fuzz;
+   const double fuzzMix=0.52*fuzz;
    double y=mainSat*(1.0-fuzzMix)+fuzzSat*fuzzMix;
 
    // Drive compensation keeps this usable after an already loud amp stage.
-   const double makeup=1.0/std::sqrt(1.0+0.85*(pre-1.0));
+   const double makeup=1.0/std::sqrt(1.0+0.62*(pre-1.0));
    y*=makeup;
 
    float filtered=(float)y;
@@ -207,15 +207,15 @@ struct GrowlForge {
   // Independent tone dimensions:
   // Tight reduces loose lows, Mass restores controlled deep weight,
   // Punch and Body shape different low-mid regions, Growl adds focused mids.
-  const float lowGain=(float)(0.72+0.56*mass-0.28*tight);
-  const float punchGain=(float)(0.78+0.55*punch);
-  const float bodyGain=(float)(0.80+0.45*body);
-  const float growlGain=(float)(0.78+0.68*growl);
-  const float highGain=(float)(0.88+0.22*bite);
+  const float lowGain=(float)(0.38+1.30*mass-0.55*tight);
+  const float punchGain=(float)(0.42+1.45*punch);
+  const float bodyGain=(float)(0.45+1.30*body);
+  const float growlGain=(float)(0.32+1.85*growl);
+  const float highGain=(float)(0.60+0.75*bite);
 
   float shaped=
     low*lowGain+
-    lowMid*(0.55f*punchGain+0.45f*bodyGain)+
+    lowMid*(0.68f*punchGain+0.62f*bodyGain)+
     growlBand*growlGain+
     high*highGain;
 
@@ -226,8 +226,8 @@ struct GrowlForge {
 
   // Bite emphasizes upper mids before the final smoothing, Presence is wider,
   // and Air is deliberately restrained to avoid reintroducing fizz.
-  y += presenceBand*(float)(-0.08+0.34*presence+0.22*bite);
-  y += airBand*(float)(-0.04+0.13*air);
+  y += presenceBand*(float)(-0.22+0.78*presence+0.58*bite);
+  y += airBand*(float)(-0.12+0.42*air);
 
   for(auto&f:c.postLP)y=f.lp(y);
 
@@ -235,7 +235,7 @@ struct GrowlForge {
 
   // Smooth bounded ceiling. Below the ceiling it is nearly transparent.
   const double normalized=y/std::max(ceilingGain,1.0e-6);
-  const double limited=std::tanh(normalized*1.15)/std::tanh(1.15);
+  const double limited=std::tanh(normalized*1.35)/std::tanh(1.35);
   y=(float)(limited*ceilingGain);
 
   return (float)clamp(y,-1.05,1.05);
@@ -391,8 +391,8 @@ const clap_plugin_descriptor_t desc{
  "",
  "",
  "",
- "1.1.0",
- "Post-amp guitar tone sculptor with oversampled saturation and controlled output.",
+ "1.1.1",
+ "Post-amp guitar tone sculptor with high-impact controls, oversampled saturation and controlled output.",
  features
 };
 
