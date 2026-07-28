@@ -1,60 +1,101 @@
-# GrowlForge 1.0 — CLAP guitar effect
+# GrowlForge 1.0.1 — CLAP guitar effect
 
-GrowlForge is a self-contained CLAP audio effect for modern heavy guitar tones. It does not copy any proprietary amplifier or artist preset. Its design target is a tight, low-tuned, growling high-gain sound with a restrained fuzzy edge.
+GrowlForge is a post-amplifier tone-shaping CLAP effect for modern heavy guitar sounds.
 
-## DSP chain
+Recommended chain:
 
-1. Input gain
-2. Envelope gate
-3. Tight variable high-pass
-4. Low/body split and growl emphasis
-5. Asymmetric soft-clipping drive
-6. Parallel restrained fuzz
-7. Presence shaping
-8. Cabinet-style low-pass
-9. Wet/dry and output gain
+```text
+Guitar → amplifier → GrowlForge → cabinet / IR loader
+```
 
-## Parameters
+It is not a model of a proprietary amplifier or artist preset. It adds growl, restrained fuzz, tightening, presence shaping and optional pre-cabinet high-frequency filtering to an already amplified signal.
 
-Input, Drive, Fuzz, Growl, Tight, Presence, Cab Filter, Gate, Mix, Output.
+## Build requirements on Windows
 
-Default values are the intended starting preset:
+Install Visual Studio with:
 
-- Input: 0 dB
-- Drive: 4.8
-- Fuzz: 3.2
-- Growl: 6.3
-- Tight: 6.8
-- Presence: 5.4
-- Cab Filter: 7.0
-- Gate: -58 dB
-- Mix: 100%
-- Output: -5 dB
+- Desktop development with C++
+- C++ CMake tools for Windows
+- Windows 10 or Windows 11 SDK
 
-## Build in Visual Studio
+CMake 3.24 or newer is required.
 
-1. Extract the project to a normal local path, preferably without OneDrive synchronization.
-2. In Visual Studio choose **File > Open > Folder** and select this directory.
-3. Select **windows-x64-release** in the configuration preset selector.
-4. Wait for CMake configuration to finish.
-5. Choose **Build > Build All**.
-6. The result is normally located at:
-   `out/build/windows-x64-release/plugins/GrowlForge.clap`
+## Recommended Windows build
 
-There is no FetchContent, network access, Git operation, or SDK generation during configuration.
+Open PowerShell inside `GrowlForge_Full` and run:
 
-## Install for REAPER on Windows
+```powershell
+.\build-windows.ps1
+```
 
-Copy `GrowlForge.clap` to one of these folders:
+The script:
 
-- `%LOCALAPPDATA%\\Programs\\Common\\CLAP`
-- `%COMMONPROGRAMFILES%\\CLAP`
+1. verifies that Windows is 64-bit;
+2. removes a stale CMake cache when `-Clean` is used;
+3. configures the Visual Studio 2026 x64 preset;
+4. builds Release;
+5. verifies that `GrowlForge.clap` was created.
 
-Then in REAPER open **Options > Preferences > Plug-ins > VST**, clear/rescan the plug-in cache, and search for GrowlForge.
+For a completely clean rebuild:
+
+```powershell
+.\build-windows.ps1 -Clean
+```
+
+The result is:
+
+```text
+out\build\windows-x64-release\plugins\GrowlForge.clap
+```
+
+### Visual Studio 2022
+
+Use:
+
+```powershell
+cmake --preset windows-x64-release-vs2022
+cmake --build --preset windows-x64-release-vs2022
+```
+
+## Manual Visual Studio 2026 build
+
+```powershell
+cmake --preset windows-x64-release
+cmake --build --preset windows-x64-release
+```
+
+The preset explicitly selects `x64`. CMake also rejects a 32-bit Windows configuration before linking, so the previous x86/x64 runtime-library conflict should no longer produce a long list of unresolved symbols.
+
+## Install for REAPER
+
+Close REAPER, then copy:
+
+```text
+out\build\windows-x64-release\plugins\GrowlForge.clap
+```
+
+to:
+
+```text
+%LOCALAPPDATA%\Programs\Common\CLAP
+```
+
+Restart REAPER and perform a plug-in rescan.
+
+## GitHub Actions
+
+`.github/workflows/windows-build.yml` builds the plug-in on a clean Windows x64 runner for every push and pull request affecting `GrowlForge_Full`.
+
+The workflow uploads `GrowlForge.clap` as a downloadable Actions artifact.
+
+## Current parameters
+
+Input, Drive, Fuzz, Growl, Tight, Presence, Cab Filter, Gate, Mix and Output.
 
 ## Current limitations
 
-- No custom GUI; REAPER displays the host-generated parameter interface.
+- No custom GUI.
 - Float32 audio path only.
 - Stereo main input/output.
-- The cabinet section is a lightweight filter, not an IR loader.
+- `Cab Filter` is a lightweight low-pass filter, not an IR loader.
+- The bundled `clap.h` is a minimal compatibility header, not the complete official CLAP SDK.

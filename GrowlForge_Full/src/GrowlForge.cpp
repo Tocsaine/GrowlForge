@@ -4,9 +4,8 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
-#include <memory>
-#include <string_view>
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
@@ -78,7 +77,7 @@ struct GrowlForge {
  }
 };
 
-GrowlForge* self(const clap_plugin_t* p){return static_cast<GrowlForge*>(p->plugin_data);} 
+GrowlForge* self(const clap_plugin_t* p){return static_cast<GrowlForge*>(p->plugin_data);}
 void handleEvents(GrowlForge* s,const clap_input_events_t* ev){
  if(!ev||!ev->size||!ev->get)return;
  for(uint32_t i=0;i<ev->size(ev);++i){auto*h=ev->get(ev,i);if(!h||h->space_id!=CLAP_CORE_EVENT_SPACE_ID||h->type!=CLAP_EVENT_PARAM_VALUE)continue;
@@ -95,7 +94,9 @@ bool plugStart(const clap_plugin_t*){return true;}
 void plugStop(const clap_plugin_t*){}
 void plugReset(const clap_plugin_t*p){for(auto&c:self(p)->ch)c.reset();}
 clap_process_status plugProcess(const clap_plugin_t*p,const clap_process_t*pr){
- auto*s=self(p);handleEvents(s,pr->in_events); if(!pr||pr->audio_inputs_count<1||pr->audio_outputs_count<1)return CLAP_PROCESS_CONTINUE;
+ if(!pr)return CLAP_PROCESS_ERROR;
+ auto*s=self(p);handleEvents(s,pr->in_events);
+ if(pr->audio_inputs_count<1||pr->audio_outputs_count<1)return CLAP_PROCESS_CONTINUE;
  auto&in=pr->audio_inputs[0];auto&out=pr->audio_outputs[0];uint32_t channels=std::min({in.channel_count,out.channel_count,2u});
  for(uint32_t c=0;c<channels;++c){if(!in.data32||!out.data32||!in.data32[c]||!out.data32[c])continue;for(uint32_t n=0;n<pr->frames_count;++n)out.data32[c][n]=s->processSample(in.data32[c][n],(int)c);}
  return CLAP_PROCESS_CONTINUE;
@@ -122,7 +123,7 @@ const void* plugExtension(const clap_plugin_t*,const char*id){if(!id)return null
 void plugMain(const clap_plugin_t*){}
 
 const char* features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
-const clap_plugin_descriptor_t desc{CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.0.0","Tight modern high-gain growl, restrained fuzz and cabinet-style filtering.",features};
+const clap_plugin_descriptor_t desc{CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.0.1","Post-amp tone sculpting, growl, restrained fuzz and pre-cab filtering.",features};
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}
 const clap_plugin_descriptor_t* factoryDesc(const clap_plugin_factory_t*,uint32_t i){return i==0?&desc:nullptr;}
 const clap_plugin_t* factoryCreate(const clap_plugin_factory_t*,const clap_host_t*h,const char*id){if(!id||std::strcmp(id,desc.id))return nullptr;auto*s=new GrowlForge(h);s->plugin={&desc,s,plugInit,plugDestroy,plugActivate,plugDeactivate,plugStart,plugStop,plugReset,plugProcess,plugExtension,plugMain};return &s->plugin;}
