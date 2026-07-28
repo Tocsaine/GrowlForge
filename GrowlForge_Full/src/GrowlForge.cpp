@@ -70,6 +70,7 @@ struct ChannelDSP {
  OnePole presenceLP;
  OnePole airLP;
  std::array<OnePole,4> antiAlias;
+ OnePole fuzzLow;
  std::array<OnePole,2> postLP;
  float gateEnv=0.0f;
  float previousShaped=0.0f;
@@ -78,6 +79,7 @@ struct ChannelDSP {
   inputHP.reset(); low180.reset(); low650.reset(); low1600.reset();
   presenceLP.reset(); airLP.reset();
   for(auto&f:antiAlias)f.reset();
+  fuzzLow.reset();
   for(auto&f:postLP)f.reset();
   gateEnv=0.0f;
   previousShaped=0.0f;
@@ -100,23 +102,25 @@ struct GrowlForge {
   const double smooth=p[Smooth].load();
   const double preCab=p[PreCab].load();
 
-  const double hpHz=38.0+24.0*tight;
+  const double hpHz=36.0+28.0*tight;
   const double osRate=sampleRate*kOversample;
 
   // Internal oversampling filter. Smooth raises damping without turning the
   // plug-in into a dull low-pass by itself.
+  // Smooth controls the internal anti-alias bandwidth and a separate
+  // high-frequency damping stage. Its action is intentionally obvious.
   const double aaCut=clamp(
-    sampleRate*(0.44-0.020*smooth),
-    9000.0,
-    std::min(19000.0,sampleRate*0.44)
+    sampleRate*(0.455-0.027*smooth),
+    6200.0,
+    std::min(20500.0,sampleRate*0.455)
   );
 
-  // Pre-cab filter is intentionally mild at low values because this plug-in
-  // is designed to sit before a separate cabinet or IR loader.
+  // Pre-Cab is a broad creative low-pass: almost open at 0 and dark enough
+  // for strong pre-cab sculpting at 10.
   const double postCut=clamp(
-    20500.0-1250.0*preCab-430.0*smooth,
-    5500.0,
-    std::min(19500.0,sampleRate*0.45)
+    20500.0-1700.0*preCab,
+    3500.0,
+    std::min(20500.0,sampleRate*0.46)
   );
 
   for(auto&c:ch){
@@ -127,6 +131,7 @@ struct GrowlForge {
    c.presenceLP.setLowpass(2600.0,sampleRate);
    c.airLP.setLowpass(6500.0,sampleRate);
    for(auto&f:c.antiAlias)f.setLowpass(aaCut,osRate);
+   c.fuzzLow.setLowpass(260.0,osRate);
    for(auto&f:c.postLP)f.setLowpass(postCut,sampleRate);
   }
  }
@@ -136,9 +141,9 @@ struct GrowlForge {
   const double grind=p[Grind].load()/10.0;
   const double fuzz=p[Fuzz].load()/10.0;
 
-  const double pre=1.0+13.0*drive+7.0*grind;
-  const double asymPos=1.0+0.34*grind;
-  const double asymNeg=1.0-0.22*grind;
+  const double pre=1.0+16.0*drive+9.0*grind;
+  const double asymPos=1.0+0.42*grind;
+  const double asymNeg=1.0-0.28*grind;
   const double fuzzGain=5.0+58.0*fuzz;
 
   float out=0.0f;
@@ -148,12 +153,23 @@ struct GrowlForge {
    const float u=start+(x-start)*t;
 
    const double mainSat=std::tanh(u*pre*(u>=0.0f?asymPos:asymNeg));
-   const double fuzzSat=std::tanh(u*fuzzGain);
-   const double fuzzMix=0.52*fuzz;
-   double y=mainSat*(1.0-fuzzMix)+fuzzSat*fuzzMix;
+
+   // Adaptive fuzz:
+   // - keeps deep lows mostly in the main saturation path;
+   // - increases fuzz on sustained mid/high content;
+   // - preserves more pick transient than a fixed full-band blend.
+   const float fuzzLow=c.fuzzLow.lp(u);
+   const float fuzzSource=u-0.72f*fuzzLow;
+   const double level=std::abs((double)u);
+   const double sustainWeight=clamp((level-0.015)/0.18,0.0,1.0);
+   const double dynamicMix=fuzz*(0.14+0.34*sustainWeight);
+   const double fuzzSat=std::tanh(fuzzSource*fuzzGain);
+   const double lowFoundation=std::tanh(fuzzLow*(1.0+5.0*drive));
+   const double intelligentFuzz=0.84*fuzzSat+0.16*lowFoundation;
+   double y=mainSat*(1.0-dynamicMix)+intelligentFuzz*dynamicMix;
 
    // Drive compensation keeps this usable after an already loud amp stage.
-   const double makeup=1.0/std::sqrt(1.0+0.62*(pre-1.0));
+   const double makeup=1.0/std::sqrt(1.0+0.58*(pre-1.0));
    y*=makeup;
 
    float filtered=(float)y;
@@ -207,10 +223,10 @@ struct GrowlForge {
   // Independent tone dimensions:
   // Tight reduces loose lows, Mass restores controlled deep weight,
   // Punch and Body shape different low-mid regions, Growl adds focused mids.
-  const float lowGain=(float)(0.38+1.30*mass-0.55*tight);
+  const float lowGain=(float)(0.34+1.48*mass-0.62*tight);
   const float punchGain=(float)(0.42+1.45*punch);
-  const float bodyGain=(float)(0.45+1.30*body);
-  const float growlGain=(float)(0.32+1.85*growl);
+  const float bodyGain=(float)(0.40+1.48*body);
+  const float growlGain=(float)(0.20+2.55*growl);
   const float highGain=(float)(0.60+0.75*bite);
 
   float shaped=
@@ -224,10 +240,16 @@ struct GrowlForge {
   const float presenceBand=y-c.presenceLP.lp(y);
   const float airBand=y-c.airLP.lp(y);
 
-  // Bite emphasizes upper mids before the final smoothing, Presence is wider,
-  // and Air is deliberately restrained to avoid reintroducing fizz.
-  y += presenceBand*(float)(-0.22+0.78*presence+0.58*bite);
-  y += airBand*(float)(-0.12+0.42*air);
+  // Bite is the focused upper-mid attack control. Presence is broader.
+  // Air acts above the presence region and can now move from dark to open.
+  y += presenceBand*(float)(-0.30+1.05*presence+0.82*bite);
+  y += airBand*(float)(-0.28+0.82*air);
+
+  // Smooth is not just a hidden anti-alias setting: it applies an audible,
+  // progressive fizz-reduction contour before the creative pre-cab filter.
+  const double smoothAmount=p[Smooth].load()/10.0;
+  y -= airBand*(float)(0.72*smoothAmount);
+  y -= presenceBand*(float)(0.18*smoothAmount);
 
   for(auto&f:c.postLP)y=f.lp(y);
 
@@ -391,8 +413,8 @@ const clap_plugin_descriptor_t desc{
  "",
  "",
  "",
- "1.1.1",
- "Post-amp guitar tone sculptor with high-impact controls, oversampled saturation and controlled output.",
+ "1.1.2",
+ "Post-amp guitar tone sculptor with expanded tone controls, adaptive fuzz and controlled output.",
  features
 };
 
