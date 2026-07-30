@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(GrowlForge VERSION 1.1.2 LANGUAGES CXX)
+project(GrowlForge VERSION 1.2.0 LANGUAGES CXX)
 
 if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR

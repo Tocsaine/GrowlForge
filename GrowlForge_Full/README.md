@@ -1,85 +1,63 @@
-# GrowlForge 1.1.2
+# GrowlForge 1.2.0
 
-GrowlForge is a post-amplifier guitar tone sculptor for CLAP hosts.
-
-```text
-Guitar → amp sim / real amp capture → GrowlForge → cabinet / IR → final EQ
-```
-
-## Changes in 1.1.2
-
-### Stronger tone response
-
-- **Tight** — slightly stronger low-end cleanup and higher maximum high-pass point.
-- **Body** — slightly wider thickness range.
-- **Mass** — slightly stronger deep-weight range.
-- **Growl** — substantially stronger focused midrange transformation.
-- **Drive** — medium increase in saturation range.
-- **Grind** — medium increase in asymmetry and metallic harmonic character.
-- **Bite** — substantially stronger upper-mid attack.
-- **Presence** — substantially stronger broad projection.
-- **Air** — now clearly moves between darker and more open top end.
-- **Smooth** — now applies an audible fizz-reduction contour in addition to internal anti-alias filtering.
-- **Pre-Cab Filter** — expanded from nearly open down to approximately 3.5 kHz.
-
-### Adaptive Fuzz
-
-Fuzz was redesigned as a more controlled layer:
-
-- deep lows remain mostly in the main saturation path;
-- fuzz is focused more on mid and high content;
-- the blend increases on sustained signal;
-- pick transients retain more of the normal Drive/Grind character;
-- low-frequency foundation is retained instead of being fully fuzzed.
-
-This makes low and medium Fuzz settings more useful after an amplifier while preserving a clearly audible effect at high settings.
-
-## Defaults
+Post-amp guitar enhancer:
 
 ```text
-Input Trim  -6 dB
-Output       0 dB
-Ceiling     -1 dB
+Amp / amp sim → GrowlForge → Cab / IR
 ```
 
-## Testing the controls
+## Neutral default
 
-Use the same riff and compare:
+A new instance is neutral:
 
 ```text
-Tight:          0 / 5 / 10
-Body:           0 / 5 / 10
-Mass:           0 / 5 / 10
-Growl:          0 / 5 / 10
-Drive:          0 / 5 / 10
-Grind:          0 / 5 / 10
-Fuzz:           0 / 3 / 7 / 10
-Bite:           0 / 5 / 10
-Presence:       0 / 5 / 10
-Air:            0 / 5 / 10
-Smooth:         0 / 5 / 10
-Pre-Cab Filter: 0 / 5 / 10
+Input Trim 0 dB
+Gate 0
+Tight through Pre-Cab Filter 0
+Parallel Dry 0%
+Output 0 dB
+Ceiling 0 dB (disabled)
+Auto-Gain Off
 ```
 
-`Smooth` and `Pre-Cab Filter` intentionally overlap only partly:
+With those values the plug-in returns the input sample unchanged.
 
-- **Smooth** reduces fizz and hard upper harmonics while retaining more articulation.
-- **Pre-Cab Filter** changes the broad upper bandwidth and can become deliberately dark.
+## Enhancer controls
 
-## Build
+All tone controls from Tight through Pre-Cab Filter use:
 
-Visual Studio 2026:
+```text
+0 = no effect
+10 = maximum effect
+```
+
+Mass, Growl and Bite now also alter harmonic structure before 4× oversampled saturation.
+
+## Auto-Gain
+
+Auto-Gain compares slow RMS levels of the dry and processed paths and applies a smoothed correction up to ±12 dB. It settles over roughly 0.2–0.4 seconds.
+
+## Installation
 
 ```powershell
+cd GrowlForge_Full
 .\build-windows.ps1 -Clean
 ```
 
-Visual Studio 2022:
+For Visual Studio 2022:
 
 ```powershell
 .\build-windows.ps1 -Clean -VisualStudio vs2022
 ```
 
+Copy `out\build\<preset>\plugins\GrowlForge.clap` to:
+
+```text
+%LOCALAPPDATA%\Programs\Common\CLAP
+```
+
+Restart the DAW and run a full CLAP rescan.
+
 ## Compatibility
 
-Version 1.1.2 keeps the same 18 parameter IDs and state layout as 1.1.0–1.1.1.
+Version 1.2.0 adds Auto-Gain and uses a new 19-parameter state format.
