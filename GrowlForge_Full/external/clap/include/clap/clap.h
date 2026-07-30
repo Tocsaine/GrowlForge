@@ -43,15 +43,25 @@ typedef struct clap_event_header {
   uint32_t flags;
 } clap_event_header_t;
 #define CLAP_CORE_EVENT_SPACE_ID 0
+#define CLAP_EVENT_IS_LIVE (1u << 0)
+#define CLAP_EVENT_DONT_RECORD (1u << 1)
 #define CLAP_EVENT_PARAM_VALUE 5
+#define CLAP_EVENT_PARAM_GESTURE_BEGIN 7
+#define CLAP_EVENT_PARAM_GESTURE_END 8
 
 typedef struct clap_event_param_value {
   clap_event_header_t header;
   clap_id param_id;
   void *cookie;
-  int32_t note_id, port_index, channel, key;
+  int32_t note_id;
+  int16_t port_index, channel, key;
   double value;
 } clap_event_param_value_t;
+
+typedef struct clap_event_param_gesture {
+  clap_event_header_t header;
+  clap_id param_id;
+} clap_event_param_gesture_t;
 
 typedef struct clap_input_events {
   void *ctx;
@@ -170,6 +180,11 @@ typedef struct clap_plugin_params {
   bool (*text_to_value)(const clap_plugin_t *plugin, clap_id param_id, const char *display, double *value);
   void (*flush)(const clap_plugin_t *plugin, const clap_input_events_t *in, const clap_output_events_t *out);
 } clap_plugin_params_t;
+typedef struct clap_host_params {
+  void (*rescan)(const clap_host_t *host, uint32_t flags);
+  void (*clear)(const clap_host_t *host, clap_id param_id, uint32_t flags);
+  void (*request_flush)(const clap_host_t *host);
+} clap_host_params_t;
 
 #define CLAP_EXT_STATE "clap.state"
 typedef struct clap_ostream {
@@ -184,6 +199,51 @@ typedef struct clap_plugin_state {
   bool (*save)(const clap_plugin_t *plugin, const clap_ostream_t *stream);
   bool (*load)(const clap_plugin_t *plugin, const clap_istream_t *stream);
 } clap_plugin_state_t;
+
+#define CLAP_EXT_GUI "clap.gui"
+#define CLAP_WINDOW_API_WIN32 "win32"
+#define CLAP_WINDOW_API_COCOA "cocoa"
+#define CLAP_WINDOW_API_UIKIT "uikit"
+#define CLAP_WINDOW_API_X11 "x11"
+#define CLAP_WINDOW_API_WAYLAND "wayland"
+typedef void *clap_hwnd;
+typedef void *clap_nsview;
+typedef void *clap_uiview;
+typedef unsigned long clap_xwnd;
+typedef struct clap_window {
+  const char *api;
+  union {
+    clap_nsview cocoa;
+    clap_uiview uikit;
+    clap_xwnd x11;
+    clap_hwnd win32;
+    void *ptr;
+  };
+} clap_window_t;
+typedef struct clap_gui_resize_hints {
+  bool can_resize_horizontally;
+  bool can_resize_vertically;
+  bool preserve_aspect_ratio;
+  uint32_t aspect_ratio_width;
+  uint32_t aspect_ratio_height;
+} clap_gui_resize_hints_t;
+typedef struct clap_plugin_gui {
+  bool (*is_api_supported)(const clap_plugin_t *plugin, const char *api, bool is_floating);
+  bool (*get_preferred_api)(const clap_plugin_t *plugin, const char **api, bool *is_floating);
+  bool (*create)(const clap_plugin_t *plugin, const char *api, bool is_floating);
+  void (*destroy)(const clap_plugin_t *plugin);
+  bool (*set_scale)(const clap_plugin_t *plugin, double scale);
+  bool (*get_size)(const clap_plugin_t *plugin, uint32_t *width, uint32_t *height);
+  bool (*can_resize)(const clap_plugin_t *plugin);
+  bool (*get_resize_hints)(const clap_plugin_t *plugin, clap_gui_resize_hints_t *hints);
+  bool (*adjust_size)(const clap_plugin_t *plugin, uint32_t *width, uint32_t *height);
+  bool (*set_size)(const clap_plugin_t *plugin, uint32_t width, uint32_t height);
+  bool (*set_parent)(const clap_plugin_t *plugin, const clap_window_t *window);
+  bool (*set_transient)(const clap_plugin_t *plugin, const clap_window_t *window);
+  void (*suggest_title)(const clap_plugin_t *plugin, const char *title);
+  bool (*show)(const clap_plugin_t *plugin);
+  bool (*hide)(const clap_plugin_t *plugin);
+} clap_plugin_gui_t;
 
 #ifdef __cplusplus
 }

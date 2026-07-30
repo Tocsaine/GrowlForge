@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(GrowlForge VERSION 1.4.4 LANGUAGES CXX)
+project(GrowlForge VERSION 2.0.0 LANGUAGES CXX)
 
 if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR
@@ -17,6 +17,11 @@ target_compile_features(GrowlForge PRIVATE cxx_std_20)
 target_include_directories(GrowlForge PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/external/clap/include"
 )
+
+if(WIN32)
+  target_compile_definitions(GrowlForge PRIVATE UNICODE _UNICODE)
+  target_link_libraries(GrowlForge PRIVATE gdiplus user32 gdi32)
+endif()
 
 if(MSVC)
   target_compile_options(GrowlForge PRIVATE /W4 /permissive- /EHsc /utf-8)

@@ -6,6 +6,18 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
+#include <string>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <windowsx.h>
+#include <gdiplus.h>
+#include <cwchar>
+#endif
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
@@ -110,10 +122,50 @@ struct ChannelDSP{
 
 struct GrowlForge{
  clap_plugin_t plugin{}; const clap_host_t* host=nullptr;
+ const clap_host_params_t* hostParams=nullptr;
  std::array<std::atomic<double>,kParamCount> p{};
+ std::array<std::atomic<double>,kParamCount> guiPendingValue{};
+ std::array<std::atomic<uint8_t>,kParamCount> guiPendingFlags{};
+ std::array<std::atomic<float>,2> guiInputPeak{};
+ std::array<std::atomic<float>,2> guiOutputPeak{};
+ std::atomic<bool> configDirty{false};
+ std::atomic<bool> autoGainResetPending{false};
+ std::atomic<bool> applyAutoGainPending{false};
+ void* guiState=nullptr;
  std::array<ChannelDSP,2> ch{}; double sampleRate=48000.0;
 
- explicit GrowlForge(const clap_host_t*h):host(h){for(size_t i=0;i<p.size();++i)p[i]=defs[i].def;}
+ explicit GrowlForge(const clap_host_t*h):host(h){
+  for(size_t i=0;i<p.size();++i){
+   p[i]=defs[i].def;guiPendingValue[i]=defs[i].def;guiPendingFlags[i]=0;
+  }
+  for(auto&v:guiInputPeak)v=0.0f;for(auto&v:guiOutputPeak)v=0.0f;
+ }
+
+ void requestParamFlush(){
+  if(hostParams&&hostParams->request_flush)hostParams->request_flush(host);
+  else if(host&&host->request_process)host->request_process(host);
+ }
+
+ void queueGuiFlag(clap_id id,uint8_t flag){
+  if(id>=kParamCount)return;guiPendingFlags[id].fetch_or(flag,std::memory_order_release);requestParamFlush();
+ }
+
+ void beginGuiGesture(clap_id id){queueGuiFlag(id,1u);}
+ void endGuiGesture(clap_id id){queueGuiFlag(id,4u);}
+
+ void setGuiParameter(clap_id id,double value){
+  if(id>=kParamCount||id==AutoGainCorrection||id>=MeterSaturation)return;
+  if(id==ApplyAutoGain){applyAutoGainPending=true;requestParamFlush();return;}
+  value=clamp(value,defs[id].min,defs[id].max);
+  if(id==AutoGain||id==X2)value=value>=0.5?1.0:0.0;else value=quantize01(value);
+  const double previous=p[id].exchange(value);
+  if(id==AutoGain&&previous!=value){
+   if(value>=0.5){p[Output]=0.0;guiPendingValue[Output]=0.0;guiPendingFlags[Output].fetch_or(2u,std::memory_order_release);}
+   autoGainResetPending=true;
+  }
+  guiPendingValue[id]=value;guiPendingFlags[id].fetch_or(2u,std::memory_order_release);
+  configDirty=true;requestParamFlush();
+ }
 
  bool enhancersZero()const{
   for(clap_id id=Tight;id<=PreCab;++id)if(p[id].load()>1e-9)return false;
@@ -462,6 +514,8 @@ struct GrowlForge{
 
 GrowlForge*self(const clap_plugin_t*p){return static_cast<GrowlForge*>(p->plugin_data);}
 
+#include "GrowlForgeGUI.h"
+
 void handleEvents(GrowlForge*s,const clap_input_events_t*ev){
  if(!ev||!ev->size||!ev->get)return;
  bool changed=false;
@@ -505,8 +559,57 @@ void handleEvents(GrowlForge*s,const clap_input_events_t*ev){
  if(changed)s->configure();
 }
 
-bool plugInit(const clap_plugin_t*){return true;}
-void plugDestroy(const clap_plugin_t*p){delete self(p);}
+bool pushGuiGesture(const clap_output_events_t*out,uint16_t type,clap_id id){
+ if(!out||!out->try_push)return false;
+ clap_event_param_gesture_t e{};e.header.size=sizeof(e);e.header.time=0;e.header.space_id=CLAP_CORE_EVENT_SPACE_ID;
+ e.header.type=type;e.header.flags=CLAP_EVENT_IS_LIVE;e.param_id=id;
+ return out->try_push(out,&e.header);
+}
+
+bool pushGuiValue(const clap_output_events_t*out,clap_id id,double value){
+ if(!out||!out->try_push)return false;
+ clap_event_param_value_t e{};e.header.size=sizeof(e);e.header.time=0;e.header.space_id=CLAP_CORE_EVENT_SPACE_ID;
+ e.header.type=CLAP_EVENT_PARAM_VALUE;e.header.flags=CLAP_EVENT_IS_LIVE;e.param_id=id;e.cookie=nullptr;
+ e.note_id=-1;e.port_index=-1;e.channel=-1;e.key=-1;e.value=value;
+ return out->try_push(out,&e.header);
+}
+
+void applyDeferredGuiActions(GrowlForge*s){
+ if(s->autoGainResetPending.exchange(false))s->resetAutoGainMeasurement();
+ if(s->applyAutoGainPending.exchange(false)){
+  s->applyCurrentAutoGain();
+  s->guiPendingValue[Output]=s->p[Output].load();
+  s->guiPendingValue[AutoGain]=s->p[AutoGain].load();
+  s->guiPendingFlags[Output].fetch_or(2u,std::memory_order_release);
+  s->guiPendingFlags[AutoGain].fetch_or(2u,std::memory_order_release);
+ }
+ if(s->configDirty.exchange(false))s->configure();
+}
+
+void flushGuiEvents(GrowlForge*s,const clap_output_events_t*out){
+ applyDeferredGuiActions(s);
+ if(!out||!out->try_push)return;
+ for(clap_id id=0;id<kParamCount;++id){
+  uint8_t flags=s->guiPendingFlags[id].exchange(0,std::memory_order_acq_rel);
+  if(!flags)continue;
+  if((flags&1u)&&!pushGuiGesture(out,CLAP_EVENT_PARAM_GESTURE_BEGIN,id)){
+   s->guiPendingFlags[id].fetch_or(flags,std::memory_order_release);continue;
+  }
+  if((flags&2u)&&!pushGuiValue(out,id,s->guiPendingValue[id].load())){
+   s->guiPendingFlags[id].fetch_or((uint8_t)(flags&6u),std::memory_order_release);continue;
+  }
+  if((flags&4u)&&!pushGuiGesture(out,CLAP_EVENT_PARAM_GESTURE_END,id))
+   s->guiPendingFlags[id].fetch_or(4u,std::memory_order_release);
+ }
+}
+
+bool plugInit(const clap_plugin_t*p){
+ auto*s=self(p);
+ if(s->host&&s->host->get_extension)
+  s->hostParams=static_cast<const clap_host_params_t*>(s->host->get_extension(s->host,CLAP_EXT_PARAMS));
+ return true;
+}
+void plugDestroy(const clap_plugin_t*p){auto*s=self(p);destroyGrowlForgeGui(s);delete s;}
 bool plugActivate(const clap_plugin_t*p,double sr,uint32_t,uint32_t){
  auto*s=self(p);if(sr<=1000)return false;s->sampleRate=sr;for(auto&c:s->ch)c.reset();s->configure();return true;
 }
@@ -514,14 +617,28 @@ void plugDeactivate(const clap_plugin_t*){} bool plugStart(const clap_plugin_t*)
 void plugStop(const clap_plugin_t*){} void plugReset(const clap_plugin_t*p){for(auto&c:self(p)->ch)c.reset();}
 
 clap_process_status plugProcess(const clap_plugin_t*p,const clap_process_t*pr){
- if(!pr)return CLAP_PROCESS_ERROR;auto*s=self(p);handleEvents(s,pr->in_events);
+ if(!pr)return CLAP_PROCESS_ERROR;
+ auto*s=self(p);handleEvents(s,pr->in_events);flushGuiEvents(s,pr->out_events);
  if(pr->audio_inputs_count<1||pr->audio_outputs_count<1)return CLAP_PROCESS_CONTINUE;
  auto&in=pr->audio_inputs[0];auto&out=pr->audio_outputs[0];
- uint32_t channels=std::min({in.channel_count,out.channel_count,2u});
+ const uint32_t channels=std::min({in.channel_count,out.channel_count,2u});
+ const float decay=(float)std::exp(-(double)pr->frames_count/std::max(1.0,0.34*s->sampleRate));
  for(uint32_t c=0;c<channels;++c){
   if(!in.data32||!out.data32||!in.data32[c]||!out.data32[c])continue;
-  for(uint32_t n=0;n<pr->frames_count;++n)out.data32[c][n]=s->processSample(in.data32[c][n],(int)c);
+  float peakIn=0.0f,peakOut=0.0f;
+  for(uint32_t n=0;n<pr->frames_count;++n){
+   const float input=in.data32[c][n];
+   const float output=s->processSample(input,(int)c);
+   out.data32[c][n]=output;peakIn=std::max(peakIn,std::abs(input));peakOut=std::max(peakOut,std::abs(output));
+  }
+  s->guiInputPeak[c]=std::max(peakIn,s->guiInputPeak[c].load()*decay);
+  s->guiOutputPeak[c]=std::max(peakOut,s->guiOutputPeak[c].load()*decay);
  }
+ for(uint32_t c=channels;c<2;++c){
+  s->guiInputPeak[c]=s->guiInputPeak[c].load()*decay;
+  s->guiOutputPeak[c]=s->guiOutputPeak[c].load()*decay;
+ }
+ s->p[AutoGainCorrection]=s->currentAutoGainDb();
  return CLAP_PROCESS_CONTINUE;
 }
 
@@ -564,7 +681,9 @@ bool textValue(const clap_plugin_t*,clap_id id,const char*t,double*v){
  *v=quantize01(clamp(x,defs[id].min,defs[id].max));
  return true;
 }
-void paramFlush(const clap_plugin_t*p,const clap_input_events_t*i,const clap_output_events_t*){handleEvents(self(p),i);}
+void paramFlush(const clap_plugin_t*p,const clap_input_events_t*i,const clap_output_events_t*out){
+ auto*s=self(p);handleEvents(s,i);flushGuiEvents(s,out);
+}
 const clap_plugin_params_t paramsExt{paramCount,paramInfo,paramValue,valueText,textValue,paramFlush};
 
 struct StateHeader{uint32_t magic=0x47465247,version=10;};
@@ -602,14 +721,15 @@ const clap_plugin_state_t stateExt{stateSave,stateLoad};
 
 const void*plugExtension(const clap_plugin_t*,const char*id){
  if(!id)return nullptr;if(!std::strcmp(id,CLAP_EXT_AUDIO_PORTS))return &audioExt;
- if(!std::strcmp(id,CLAP_EXT_PARAMS))return &paramsExt;if(!std::strcmp(id,CLAP_EXT_STATE))return &stateExt;return nullptr;
+ if(!std::strcmp(id,CLAP_EXT_PARAMS))return &paramsExt;if(!std::strcmp(id,CLAP_EXT_STATE))return &stateExt;
+ if(!std::strcmp(id,CLAP_EXT_GUI))return &guiExt;return nullptr;
 }
 void plugMain(const clap_plugin_t*){}
 
 const char*features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
 const clap_plugin_descriptor_t desc{
- CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.4.4",
- "Post-amp guitar enhancer with resonance, compression, harmonic control and live activity indicators.",features
+ CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","2.0.0",
+ "Post-amp guitar character processor with a scalable custom interface, live meters and tactile distortion shaping.",features
 };
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}
 const clap_plugin_descriptor_t*factoryDesc(const clap_plugin_factory_t*,uint32_t i){return i==0?&desc:nullptr;}
@@ -619,7 +739,7 @@ const clap_plugin_t*factoryCreate(const clap_plugin_factory_t*,const clap_host_t
  return &s->plugin;
 }
 const clap_plugin_factory_t factory{factoryCount,factoryDesc,factoryCreate};
-bool entryInit(const char*){return true;}void entryDeinit(){}
+bool entryInit(const char*){return growlForgeGuiGlobalInit();}void entryDeinit(){growlForgeGuiGlobalShutdown();}
 const void*entryFactory(const char*id){return id&&!std::strcmp(id,CLAP_PLUGIN_FACTORY_ID)?&factory:nullptr;}
 }
 extern "C" CLAP_EXPORT const clap_plugin_entry_t clap_entry{CLAP_VERSION,entryInit,entryDeinit,entryFactory};

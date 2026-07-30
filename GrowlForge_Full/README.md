@@ -1,4 +1,22 @@
-# GrowlForge 1.4.4
+# GrowlForge 2.0.0
+
+
+## GrowlForge 2.0 custom interface
+
+Version 2.0 adds a native scalable Win32 interface through the CLAP GUI extension.
+The DSP, parameter IDs, ranges and state version remain compatible with 1.4.4.
+
+Highlights:
+
+- one-screen layout with Input & Feel, Distortion Core, Motion & Dynamics,
+  Tone & Texture, and Routing & Output sections;
+- large central Drive control and visually separate Fuzz control;
+- stereo input/output meters and real activity meters;
+- host automation gestures for GUI edits;
+- Shift fine control, double-click reset and mouse-wheel adjustment;
+- 1200 × 720 default size with 5:3 scalable vector rendering.
+
+See `docs/GUI.md` and `ANNOUNCEMENT_RU.md`.
 
 Post-amp guitar enhancer:
 
