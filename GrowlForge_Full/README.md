@@ -1,4 +1,4 @@
-# GrowlForge 1.2.4
+# GrowlForge 1.3.0
 
 Post-amp guitar enhancer:
 
@@ -94,3 +94,22 @@ The internal RMS history is reset at the same time.
 - `Tight` keeps a familiar lower range but accelerates above roughly `7`.
 - `Drive`, `Grind`, and `Fuzz` become more exaggerated from roughly `8–10`.
 - The design target remains: `0` is neutral, while `10` is intentionally oversized.
+
+
+## 1.3.0 additive controls
+
+The v1.2.4 voicing and all existing parameter IDs are preserved. Seven controls
+were appended; every one defaults to `0`, and at `0` its DSP contribution is zero.
+
+- `Bloom`: adds harmonic growth during note decay.
+- `Sag`: adds level-dependent power-supply-style compression and recovery.
+- `Dynamics`: increases the dependence of saturation on picking strength.
+- `Texture`: adds progressively rougher, grainier nonlinear detail.
+- `Focus`: concentrates the nonlinear feed toward the midrange; it does not alter
+  the existing enhancer controls when set to `0`.
+- `Attack`: emphasizes detected note transients.
+- `Stereo Width`: adds subtle opposite-polarity high-frequency decorrelation.
+  It is inactive at `0` and is intended for stereo material.
+
+State files from v1.2.4/state version 7 are accepted. New parameters load at zero
+when an older state is restored.
