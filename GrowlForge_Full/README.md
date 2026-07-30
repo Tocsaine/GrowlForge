@@ -1,4 +1,4 @@
-# GrowlForge 1.4.0
+# GrowlForge 1.4.1
 
 Post-amp guitar enhancer:
 
@@ -137,3 +137,15 @@ Added without changing parameter IDs 0-26 or the DSP path when the new controls 
 - Indicator section: live read-only Saturation, Bloom, Compression, Sag and Attack activity meters for hosts using the generic CLAP parameter interface.
 
 All new controls default to zero/off. State versions 7, 8 and 9 remain loadable.
+
+
+## 1.4.1 Drive redesign
+
+- Reworked only the Drive stage; no other control algorithm was intentionally changed.
+- Added restrained broad-mid pre-emphasis inside Drive.
+- Added a blend of symmetric and asymmetric saturation that evolves with Drive.
+- Added short transient-sensitive drive pressure for stronger pick response.
+- Preserved a predictable, near-linear 0-10 control range.
+- x2 now increases Drive character and touch response instead of doubling raw Drive gain.
+- Compression interaction was deliberately not added.
+- Drive at 0 fully bypasses the new Drive-specific processing.

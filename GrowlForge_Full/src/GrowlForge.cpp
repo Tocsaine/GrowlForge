@@ -94,7 +94,7 @@ struct ChannelDSP{
  std::array<OnePole,4> antiAlias;
  std::array<OnePole,2> postLP;
  float gateEnv=0,previousInput=0;
- float fastEnv=0,slowEnv=0,sagEnv=0,attackMemory=0,attackEnv=0,compEnv=0;
+ float fastEnv=0,slowEnv=0,sagEnv=0,attackMemory=0,attackEnv=0,compEnv=0,driveFastEnv=0,driveSlowEnv=0;
  float meterSat=0,meterBloom=0,meterComp=0,meterSag=0,meterAttack=0;
  double dryRms2=1e-8,wetRms2=1e-8,autoGain=1.0;
  void reset(){
@@ -102,7 +102,7 @@ struct ChannelDSP{
   presenceLP.reset();airLP.reset();fuzzLow.reset();
   for(auto&f:antiAlias)f.reset();for(auto&f:postLP)f.reset();
   gateEnv=previousInput=0;
-  fastEnv=slowEnv=sagEnv=attackMemory=attackEnv=compEnv=0;
+  fastEnv=slowEnv=sagEnv=attackMemory=attackEnv=compEnv=driveFastEnv=driveSlowEnv=0;
   meterSat=meterBloom=meterComp=meterSag=meterAttack=0;
   dryRms2=wetRms2=1e-8;autoGain=1.0;
  }
@@ -168,7 +168,11 @@ struct GrowlForge{
  }
 
  float nonlinear(float x,float low,float growlBand,float high,ChannelDSP&c){
-  double mass=color(p[Mass].load()/10.0),growl=color(p[Growl].load()/10.0),drive=color(p[Drive].load()/10.0);
+  double mass=color(p[Mass].load()/10.0),growl=color(p[Growl].load()/10.0);
+  // Drive keeps a predictable 0..10 amount. x2 increases its character
+  // (asymmetry, harmonic complexity and touch response), not raw gain.
+  const double drive=clamp(p[Drive].load()/10.0,0.0,1.0);
+  const double driveCharacter=x2Enabled()?2.0:1.0;
   double grind=color(p[Grind].load()/10.0),fuzz=color(p[Fuzz].load()/10.0),bite=color(p[Bite].load()/10.0);
   double harmonicBias=color(p[HarmonicBias].load()/10.0);
   double focus=p[Focus].load()/10.0;
@@ -189,27 +193,64 @@ struct GrowlForge{
    target=(float)(target*(1.0-biasMix)+std::tanh(target+2.4*even)*biasMix);
   }
 
-  double pre=1+16*drive+9*grind+2.5*growl+1.5*bite;
+  // Touch-sensitive Drive stage. The knob remains nearly linear in amount,
+  // while its timbre evolves from density to character to aggression.
+  float driveInput=target;
+  double driveTransient=0.0;
+  if(drive>0.0){
+   const float level=std::abs(target);
+   const float fastA=(float)std::exp(-1.0/(0.0018*sampleRate));
+   const float fastR=(float)std::exp(-1.0/(0.030*sampleRate));
+   const float slowA=(float)std::exp(-1.0/(0.025*sampleRate));
+   const float slowR=(float)std::exp(-1.0/(0.180*sampleRate));
+   c.driveFastEnv=level>c.driveFastEnv?fastA*c.driveFastEnv+(1-fastA)*level:
+                                        fastR*c.driveFastEnv+(1-fastR)*level;
+   c.driveSlowEnv=level>c.driveSlowEnv?slowA*c.driveSlowEnv+(1-slowA)*level:
+                                        slowR*c.driveSlowEnv+(1-slowR)*level;
+   driveTransient=clamp((c.driveFastEnv-c.driveSlowEnv)/(c.driveFastEnv+0.006f),0.0,1.0);
+
+   // Broad, restrained mid emphasis: enough to give the clipping stage teeth,
+   // but never a hard low cut or a separate EQ effect.
+   const double midEmphasis=drive*(0.08+0.18*drive)*driveCharacter;
+   driveInput+=(float)(growlBand*midEmphasis+high*(0.025*drive*driveCharacter));
+  }
+
+  const double touchGain=1.0+drive*(0.55+0.85*drive)*driveTransient*driveCharacter;
+  double pre=1+12.5*drive+7.0*drive*drive+9*grind+2.5*growl+1.5*bite;
   double pos=1+0.42*grind+0.18*growl,neg=1-0.28*grind,fuzzGain=5+58*fuzz;
   float out=0,start=c.previousInput;
 
   for(int i=1;i<=kOversample;++i){
-   float t=(float)i/kOversample,u=start+(target-start)*t;
-   double amount=clamp(0.82*drive+0.62*grind+0.32*growl+0.22*bite+0.18*mass,0.0,1.0);
-   double sat=std::tanh(u*pre*(u>=0?pos:neg));
-   double main=u*(1-amount)+sat*amount;
+   float t=(float)i/kOversample,u=start+(driveInput-start)*t;
+   const double driven=u*touchGain;
+   double amount=clamp(0.78*drive+0.62*grind+0.32*growl+0.22*bite+0.18*mass,0.0,1.0);
+
+   // Soft symmetric density remains the foundation. As Drive rises, a second
+   // asymmetric stage contributes even harmonics and a more vocal response.
+   const double symmetric=std::tanh(driven*pre);
+   const double asymmetry=drive*drive*(0.10+0.24*drive)*driveCharacter;
+   const double biased=driven+asymmetry*(0.42+0.58*std::abs(driven));
+   const double asymmetric=std::tanh(biased*pre*(driven>=0?1.0+0.22*asymmetry:1.0-0.16*asymmetry));
+   const double characterMix=clamp(drive*(0.08+0.34*drive)*driveCharacter,0.0,0.72);
+   const double driveSat=symmetric*(1.0-characterMix)+asymmetric*characterMix;
+
+   // Existing Grind polarity and the rest of the nonlinear architecture are
+   // preserved. Drive contributes character without changing Fuzz behaviour.
+   const double otherSat=std::tanh(driven*pre*(driven>=0?pos:neg));
+   const double sat=drive>0.0?driveSat*(1.0-clamp(grind*0.55,0.0,0.75))+otherSat*clamp(grind*0.55,0.0,0.75):otherSat;
+   double main=driven*(1-amount)+sat*amount;
 
    float fl=c.fuzzLow.lp(u),fs=u-0.72f*fl;
    double sustain=clamp((std::abs((double)u)-0.015)/0.18,0.0,1.0);
    double fm=fuzz*(0.12+0.34*sustain);
    double intelligent=0.86*std::tanh(fs*fuzzGain)+0.14*std::tanh(fl*(1+4*drive));
-   double y=(main*(1-fm)+intelligent*fm)/std::sqrt(1+0.50*(pre-1)*amount);
+   double y=(main*(1-fm)+intelligent*fm)/std::sqrt(1+0.46*(pre-1)*amount);
 
    float filtered=(float)y;for(auto&f:c.antiAlias)filtered=f.lp(filtered);out=filtered;
   }
   const float satTarget=(float)(100.0*clamp(0.45*drive+0.34*grind+0.28*fuzz+0.18*growl+0.16*harmonicBias,0.0,1.0));
   c.meterSat+=0.02f*(satTarget-c.meterSat);
-  c.previousInput=target;return out;
+  c.previousInput=driveInput;return out;
  }
 
 
@@ -542,7 +583,7 @@ void plugMain(const clap_plugin_t*){}
 
 const char*features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
 const clap_plugin_descriptor_t desc{
- CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.4.0",
+ CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.4.1",
  "Post-amp guitar enhancer with resonance, compression, harmonic control and live activity indicators.",features
 };
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}
