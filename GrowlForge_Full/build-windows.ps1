@@ -40,5 +40,5 @@ if (-not (Test-Path $plugin)) {
 }
 
 Write-Host ""
-Write-Host "GrowlForge 1.2.2 build succeeded."
+Write-Host "GrowlForge 1.2.3 build succeeded."
 Write-Host "Plug-in: $plugin"

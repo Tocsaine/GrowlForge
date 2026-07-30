@@ -250,7 +250,14 @@ void handleEvents(GrowlForge*s,const clap_input_events_t*ev){
   if(v->param_id==AutoGain){
    const double previous=s->p[AutoGain].load();
    s->p[AutoGain]=x;
-   if(previous!=x)s->resetAutoGainMeasurement();
+
+   if(previous!=x){
+    // Auto-Gain must measure from a neutral output reference.
+    // Enabling it clears any previously committed/manual Output gain.
+    if(x>=0.5)s->p[Output]=0.0;
+    s->resetAutoGainMeasurement();
+   }
+
    changed=true;
    continue;
   }
@@ -323,14 +330,14 @@ bool textValue(const clap_plugin_t*,clap_id id,const char*t,double*v){
 void paramFlush(const clap_plugin_t*p,const clap_input_events_t*i,const clap_output_events_t*){handleEvents(self(p),i);}
 const clap_plugin_params_t paramsExt{paramCount,paramInfo,paramValue,valueText,textValue,paramFlush};
 
-struct StateBlob{uint32_t magic=0x47465247,version=5;double values[kParamCount]{};};
+struct StateBlob{uint32_t magic=0x47465247,version=6;double values[kParamCount]{};};
 bool stateSave(const clap_plugin_t*p,const clap_ostream_t*s){
  if(!s||!s->write)return false;StateBlob b;for(size_t i=0;i<kParamCount;++i)b.values[i]=self(p)->p[i];
  return s->write(s,&b,sizeof(b))==(int64_t)sizeof(b);
 }
 bool stateLoad(const clap_plugin_t*p,const clap_istream_t*s){
  if(!s||!s->read)return false;StateBlob b;
- if(s->read(s,&b,sizeof(b))!=(int64_t)sizeof(b)||b.magic!=0x47465247||b.version!=5)return false;
+ if(s->read(s,&b,sizeof(b))!=(int64_t)sizeof(b)||b.magic!=0x47465247||b.version!=6)return false;
  for(size_t i=0;i<kParamCount;++i){
   if(i==AutoGainCorrection||i==ApplyAutoGain){self(p)->p[i]=0.0;continue;}
   double value=clamp(b.values[i],defs[i].min,defs[i].max);
@@ -348,8 +355,8 @@ void plugMain(const clap_plugin_t*){}
 
 const char*features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
 const clap_plugin_descriptor_t desc{
- CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.2.2",
- "Post-amp guitar enhancer with stable Auto-Gain commit and centered gain controls.",features
+ CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.2.3",
+ "Post-amp guitar enhancer with neutral-reference Auto-Gain measurement.",features
 };
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}
 const clap_plugin_descriptor_t*factoryDesc(const clap_plugin_factory_t*,uint32_t i){return i==0?&desc:nullptr;}

@@ -1,4 +1,4 @@
-# GrowlForge 1.2.2
+# GrowlForge 1.2.3
 
 Post-amp guitar enhancer:
 
@@ -77,3 +77,11 @@ Version 1.2.0 adds Auto-Gain and uses a new 19-parameter state format.
 - `Output` range: `-12…+12 dB`, default and center `0 dB`.
 - `Apply Auto-Gain` now writes the current absolute correction to `Output` instead of adding it repeatedly.
 - Auto-Gain RMS history and internal gain are reset whenever Auto-Gain is toggled or committed.
+
+
+## 1.2.3 change
+
+When `Auto-Gain` is enabled, `Output` is immediately reset to `0 dB`.
+This gives the loudness matcher a neutral reference and prevents previously
+committed or manually entered Output gain from contaminating the measurement.
+The internal RMS history is reset at the same time.
