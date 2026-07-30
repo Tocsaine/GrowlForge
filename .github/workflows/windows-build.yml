@@ -32,6 +32,6 @@ jobs:
           Get-Item $plugin | Format-List FullName,Length,LastWriteTime
       - uses: actions/upload-artifact@v4
         with:
-          name: GrowlForge-1.2.1-windows-x64
+          name: GrowlForge-1.2.2-windows-x64
           path: GrowlForge_Full/out/build/windows-x64-release-vs2022/plugins/GrowlForge.clap
           if-no-files-found: error

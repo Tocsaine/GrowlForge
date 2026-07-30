@@ -1,4 +1,4 @@
-# GrowlForge 1.2.1
+# GrowlForge 1.2.2
 
 Post-amp guitar enhancer:
 
@@ -69,3 +69,11 @@ Version 1.2.0 adds Auto-Gain and uses a new 19-parameter state format.
 - Hosts that expose CLAP text editing can pass exact keyboard-entered values.
 - `Auto-Gain Correction` shows the current smoothed correction in dB.
 - Set `Apply Auto-Gain` to `Apply` to add that correction to `Output`, disable Auto-Gain, and reset the temporary correction.
+
+
+## 1.2.2 changes
+
+- `Input Trim` range: `-12…+12 dB`, default and center `0 dB`.
+- `Output` range: `-12…+12 dB`, default and center `0 dB`.
+- `Apply Auto-Gain` now writes the current absolute correction to `Output` instead of adding it repeatedly.
+- Auto-Gain RMS history and internal gain are reset whenever Auto-Gain is toggled or committed.

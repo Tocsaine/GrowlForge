@@ -28,7 +28,7 @@ constexpr uint32_t kToggle = CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_IS_STEPPED;
 constexpr uint32_t kReadOnly = CLAP_PARAM_IS_READONLY;
 
 constexpr std::array<ParamDef,kParamCount> defs{{
- {Input,"Input Trim","Gain",-24,12,0," dB",kAuto},
+ {Input,"Input Trim","Gain",-12,12,0," dB",kAuto},
  {Gate,"Gate","Dynamics",0,10,0,"",kAuto},
  {Tight,"Tight","Enhancers",0,10,0,"",kAuto},
  {Punch,"Punch","Enhancers",0,10,0,"",kAuto},
@@ -44,7 +44,7 @@ constexpr std::array<ParamDef,kParamCount> defs{{
  {Smooth,"Smooth","Enhancers",0,10,0,"",kAuto},
  {PreCab,"Pre-Cab Filter","Enhancers",0,10,0,"",kAuto},
  {ParallelDry,"Parallel Dry","Output",0,100,0," %",kAuto},
- {Output,"Output","Output",-24,12,0," dB",kAuto},
+ {Output,"Output","Output",-12,12,0," dB",kAuto},
  {Ceiling,"Ceiling","Output",-12,0,0," dB",kAuto},
  {AutoGain,"Auto-Gain","Output",0,1,0,"",kToggle},
  {AutoGainCorrection,"Auto-Gain Correction","Output",-12,12,0," dB",kReadOnly},
@@ -97,13 +97,22 @@ struct GrowlForge{
   return clamp(gainToDb(average),-12.0,12.0);
  }
 
+ void resetAutoGainMeasurement(){
+  for(auto&c:ch){
+   c.dryRms2=1.0e-8;
+   c.wetRms2=1.0e-8;
+   c.autoGain=1.0;
+  }
+ }
+
  void applyCurrentAutoGain(){
+  // Auto-Gain is measured before Output. Commit the current absolute
+  // correction to Output once, then clear all measurement history.
   const double correction=quantize01(currentAutoGainDb());
-  const double newOutput=quantize01(clamp(p[Output].load()+correction,defs[Output].min,defs[Output].max));
-  p[Output]=newOutput;
+  p[Output]=quantize01(clamp(correction,defs[Output].min,defs[Output].max));
   p[AutoGain]=0.0;
   p[ApplyAutoGain]=0.0;
-  for(auto&c:ch)c.autoGain=1.0;
+  resetAutoGainMeasurement();
  }
 
  void configure(){
@@ -238,6 +247,14 @@ void handleEvents(GrowlForge*s,const clap_input_events_t*ev){
    continue;
   }
 
+  if(v->param_id==AutoGain){
+   const double previous=s->p[AutoGain].load();
+   s->p[AutoGain]=x;
+   if(previous!=x)s->resetAutoGainMeasurement();
+   changed=true;
+   continue;
+  }
+
   s->p[v->param_id]=x;
   changed=true;
  }
@@ -306,14 +323,14 @@ bool textValue(const clap_plugin_t*,clap_id id,const char*t,double*v){
 void paramFlush(const clap_plugin_t*p,const clap_input_events_t*i,const clap_output_events_t*){handleEvents(self(p),i);}
 const clap_plugin_params_t paramsExt{paramCount,paramInfo,paramValue,valueText,textValue,paramFlush};
 
-struct StateBlob{uint32_t magic=0x47465247,version=4;double values[kParamCount]{};};
+struct StateBlob{uint32_t magic=0x47465247,version=5;double values[kParamCount]{};};
 bool stateSave(const clap_plugin_t*p,const clap_ostream_t*s){
  if(!s||!s->write)return false;StateBlob b;for(size_t i=0;i<kParamCount;++i)b.values[i]=self(p)->p[i];
  return s->write(s,&b,sizeof(b))==(int64_t)sizeof(b);
 }
 bool stateLoad(const clap_plugin_t*p,const clap_istream_t*s){
  if(!s||!s->read)return false;StateBlob b;
- if(s->read(s,&b,sizeof(b))!=(int64_t)sizeof(b)||b.magic!=0x47465247||b.version!=4)return false;
+ if(s->read(s,&b,sizeof(b))!=(int64_t)sizeof(b)||b.magic!=0x47465247||b.version!=5)return false;
  for(size_t i=0;i<kParamCount;++i){
   if(i==AutoGainCorrection||i==ApplyAutoGain){self(p)->p[i]=0.0;continue;}
   double value=clamp(b.values[i],defs[i].min,defs[i].max);
@@ -331,8 +348,8 @@ void plugMain(const clap_plugin_t*){}
 
 const char*features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
 const clap_plugin_descriptor_t desc{
- CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.2.1",
- "Post-amp guitar enhancer with 0.1 parameter precision, visible Auto-Gain correction and gain commit.",features
+ CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.2.2",
+ "Post-amp guitar enhancer with stable Auto-Gain commit and centered gain controls.",features
 };
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}
 const clap_plugin_descriptor_t*factoryDesc(const clap_plugin_factory_t*,uint32_t i){return i==0?&desc:nullptr;}
