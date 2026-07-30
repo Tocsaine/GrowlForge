@@ -1,4 +1,4 @@
-# GrowlForge 1.4.1
+# GrowlForge 1.4.2
 
 Post-amp guitar enhancer:
 
@@ -149,3 +149,15 @@ All new controls default to zero/off. State versions 7, 8 and 9 remain loadable.
 - x2 now increases Drive character and touch response instead of doubling raw Drive gain.
 - Compression interaction was deliberately not added.
 - Drive at 0 fully bypasses the new Drive-specific processing.
+
+
+## 1.4.2 Drive range and distortion update
+
+- Rebalanced Drive so the middle of the 0-10 range is clearly audible on a clean input.
+- Increased internal pre-gain and wet contribution without turning the control into an output boost.
+- Added a smoothly blended second clipping stage above roughly Drive 5.5.
+- Maximum Drive now approaches controlled distortion while remaining distinct from Fuzz.
+- Preserved pick attack by reducing second-stage pressure during detected transients.
+- Added subtle low-end cleanup and broader mid emphasis at high Drive values.
+- x2 increases the harder-stage blend, asymmetry and touch pressure instead of doubling output level.
+- Compression and every non-Drive control remain intentionally unchanged.

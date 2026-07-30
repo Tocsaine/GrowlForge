@@ -193,8 +193,9 @@ struct GrowlForge{
    target=(float)(target*(1.0-biasMix)+std::tanh(target+2.4*even)*biasMix);
   }
 
-  // Touch-sensitive Drive stage. The knob remains nearly linear in amount,
-  // while its timbre evolves from density to character to aggression.
+  // Touch-sensitive Drive stage. The full 0..10 range is deliberately useful:
+  // the middle already reaches a clear overdrive, while the upper range blends
+  // into a controlled second distortion stage without becoming Fuzz.
   float driveInput=target;
   double driveTransient=0.0;
   if(drive>0.0){
@@ -209,42 +210,66 @@ struct GrowlForge{
                                         slowR*c.driveSlowEnv+(1-slowR)*level;
    driveTransient=clamp((c.driveFastEnv-c.driveSlowEnv)/(c.driveFastEnv+0.006f),0.0,1.0);
 
-   // Broad, restrained mid emphasis: enough to give the clipping stage teeth,
-   // but never a hard low cut or a separate EQ effect.
-   const double midEmphasis=drive*(0.08+0.18*drive)*driveCharacter;
-   driveInput+=(float)(growlBand*midEmphasis+high*(0.025*drive*driveCharacter));
+   // A broad mid push gives the clipping stage body and teeth. At high Drive a
+   // small amount of deep low end is removed before the harder stage so palm
+   // mutes stay compact instead of turning into loose clipping.
+   const double midEmphasis=drive*(0.15+0.27*drive)*driveCharacter;
+   const double lowCleanup=drive*drive*(0.035+0.055*drive);
+   driveInput+=(float)(growlBand*midEmphasis+high*(0.035*drive*driveCharacter)-low*lowCleanup);
   }
 
-  const double touchGain=1.0+drive*(0.55+0.85*drive)*driveTransient*driveCharacter;
-  double pre=1+12.5*drive+7.0*drive*drive+9*grind+2.5*growl+1.5*bite;
+  // Raise the useful middle of the control without introducing a perceptible
+  // step or dead zone. Drive 5 now carries roughly two thirds of the available
+  // internal pressure rather than behaving like a weak preamp trim.
+  const double driveShape=clamp(drive+0.52*drive*(1.0-drive),0.0,1.0);
+  const double touchGain=1.0+driveShape*(0.72+1.05*driveShape)*driveTransient*driveCharacter;
+  double pre=1+18.5*driveShape+11.0*driveShape*driveShape+9*grind+2.5*growl+1.5*bite;
   double pos=1+0.42*grind+0.18*growl,neg=1-0.28*grind,fuzzGain=5+58*fuzz;
   float out=0,start=c.previousInput;
 
   for(int i=1;i<=kOversample;++i){
    float t=(float)i/kOversample,u=start+(driveInput-start)*t;
    const double driven=u*touchGain;
-   double amount=clamp(0.78*drive+0.62*grind+0.32*growl+0.22*bite+0.18*mass,0.0,1.0);
+   double amount=clamp(0.96*driveShape+0.62*grind+0.32*growl+0.22*bite+0.18*mass,0.0,1.0);
 
-   // Soft symmetric density remains the foundation. As Drive rises, a second
-   // asymmetric stage contributes even harmonics and a more vocal response.
+   // First stage: responsive overdrive with a progressively asymmetric voice.
    const double symmetric=std::tanh(driven*pre);
-   const double asymmetry=drive*drive*(0.10+0.24*drive)*driveCharacter;
+   const double asymmetry=driveShape*driveShape*(0.12+0.30*driveShape)*driveCharacter;
    const double biased=driven+asymmetry*(0.42+0.58*std::abs(driven));
-   const double asymmetric=std::tanh(biased*pre*(driven>=0?1.0+0.22*asymmetry:1.0-0.16*asymmetry));
-   const double characterMix=clamp(drive*(0.08+0.34*drive)*driveCharacter,0.0,0.72);
-   const double driveSat=symmetric*(1.0-characterMix)+asymmetric*characterMix;
+   const double asymmetric=std::tanh(biased*pre*(driven>=0?1.0+0.24*asymmetry:1.0-0.17*asymmetry));
+   const double characterMix=clamp(driveShape*(0.10+0.40*driveShape)*driveCharacter,0.0,0.78);
+   const double firstStage=symmetric*(1.0-characterMix)+asymmetric*characterMix;
 
-   // Existing Grind polarity and the rest of the nonlinear architecture are
-   // preserved. Drive contributes character without changing Fuzz behaviour.
+   // Second stage: fades in above roughly Drive 5.5 and moves the top of the
+   // range toward distortion. The first few milliseconds of a pick transient
+   // are deliberately fed less strongly into this stage, preserving tactile
+   // attack even when the sustained body is heavily clipped.
+   const double hardStart=clamp((driveShape-0.58)/0.42,0.0,1.0);
+   const double hardCurve=hardStart*hardStart*(3.0-2.0*hardStart);
+   const double transientRelief=1.0-driveTransient*(0.46+0.16*driveShape);
+   const double x2Hard=x2Enabled()?1.32:1.0;
+   const double hardMix=clamp(hardCurve*(0.72*x2Hard)*transientRelief,0.0,0.88);
+   const double hardInput=firstStage*(1.75+2.45*driveShape*x2Hard);
+   const double hardAsym=asymmetry*(x2Enabled()?1.20:0.82);
+   const double hardStage=0.72*std::tanh(hardInput+hardAsym)+0.28*std::tanh(hardInput*1.85-hardAsym*0.55);
+   const double driveSat=firstStage*(1.0-hardMix)+hardStage*hardMix;
+
+   // Existing Grind polarity and Fuzz architecture remain untouched. Drive is
+   // mixed into the established nonlinear path rather than replacing it.
    const double otherSat=std::tanh(driven*pre*(driven>=0?pos:neg));
-   const double sat=drive>0.0?driveSat*(1.0-clamp(grind*0.55,0.0,0.75))+otherSat*clamp(grind*0.55,0.0,0.75):otherSat;
+   const double grindMix=clamp(grind*0.55,0.0,0.75);
+   const double sat=drive>0.0?driveSat*(1.0-grindMix)+otherSat*grindMix:otherSat;
    double main=driven*(1-amount)+sat*amount;
 
    float fl=c.fuzzLow.lp(u),fs=u-0.72f*fl;
    double sustain=clamp((std::abs((double)u)-0.015)/0.18,0.0,1.0);
    double fm=fuzz*(0.12+0.34*sustain);
-   double intelligent=0.86*std::tanh(fs*fuzzGain)+0.14*std::tanh(fl*(1+4*drive));
-   double y=(main*(1-fm)+intelligent*fm)/std::sqrt(1+0.46*(pre-1)*amount);
+   double intelligent=0.86*std::tanh(fs*fuzzGain)+0.14*std::tanh(fl*(1+4*driveShape));
+
+   // Moderate level normalization keeps the increased Drive power audible. It
+   // prevents a large loudness jump without cancelling the new mid-range gain.
+   const double normalization=std::sqrt(1+0.23*(pre-1)*amount);
+   double y=(main*(1-fm)+intelligent*fm)/normalization;
 
    float filtered=(float)y;for(auto&f:c.antiAlias)filtered=f.lp(filtered);out=filtered;
   }
@@ -583,7 +608,7 @@ void plugMain(const clap_plugin_t*){}
 
 const char*features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
 const clap_plugin_descriptor_t desc{
- CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.4.1",
+ CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.4.2",
  "Post-amp guitar enhancer with resonance, compression, harmonic control and live activity indicators.",features
 };
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}
