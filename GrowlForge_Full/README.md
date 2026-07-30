@@ -1,4 +1,4 @@
-# GrowlForge 1.3.0
+# GrowlForge 1.3.1
 
 Post-amp guitar enhancer:
 
@@ -113,3 +113,14 @@ were appended; every one defaults to `0`, and at `0` its DSP contribution is zer
 
 State files from v1.2.4/state version 7 are accepted. New parameters load at zero
 when an older state is restored.
+
+
+## 1.3.1 changes
+
+- Removed `Stereo Width` from the plugin.
+- Reworked `Attack` into a stronger two-stage transient enhancer:
+  - fast edge emphasis for pick definition;
+  - short envelope-shaped body emphasis for a more audible attack.
+- The maximum Attack effect is roughly twice as strong as in v1.3.0.
+- All other controls and the v1.3.0 voicing remain unchanged.
+- State versions 7 and 8 remain loadable. The removed Stereo Width value is ignored.

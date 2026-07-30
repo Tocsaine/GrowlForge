@@ -9,14 +9,14 @@
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
-constexpr uint32_t kParamCount = 28;
+constexpr uint32_t kParamCount = 27;
 constexpr int kOversample = 4;
 
 enum ParamId : clap_id {
  Input=0, Gate, Tight, Punch, Body, Mass, Growl, Drive, Grind, Fuzz,
  Bite, Presence, Air, Smooth, PreCab, ParallelDry, Output, Ceiling, AutoGain,
  AutoGainCorrection, ApplyAutoGain,
- Bloom, Sag, Dynamics, Texture, Focus, Attack, StereoWidth
+ Bloom, Sag, Dynamics, Texture, Focus, Attack
 };
 
 struct ParamDef {
@@ -55,8 +55,7 @@ constexpr std::array<ParamDef,kParamCount> defs{{
  {Dynamics,"Dynamics","Motion",0,10,0,"",kAuto},
  {Texture,"Texture","Character",0,10,0,"",kAuto},
  {Focus,"Focus","Character",0,10,0,"",kAuto},
- {Attack,"Attack","Motion",0,10,0,"",kAuto},
- {StereoWidth,"Stereo Width","Stereo",0,10,0,"",kAuto}
+ {Attack,"Attack","Motion",0,10,0,"",kAuto}
 }};
 
 inline double dbToGain(double db){return std::pow(10.0,db/20.0);}
@@ -84,17 +83,14 @@ struct ChannelDSP{
  std::array<OnePole,4> antiAlias;
  std::array<OnePole,2> postLP;
  float gateEnv=0,previousInput=0;
- float fastEnv=0,slowEnv=0,sagEnv=0,attackMemory=0,widthPrev=0;
- std::array<float,64> widthDelay{};
- uint32_t widthIndex=0;
+ float fastEnv=0,slowEnv=0,sagEnv=0,attackMemory=0,attackEnv=0;
  double dryRms2=1e-8,wetRms2=1e-8,autoGain=1.0;
  void reset(){
   tightHP.reset();low180.reset();low650.reset();low1600.reset();
   presenceLP.reset();airLP.reset();fuzzLow.reset();
   for(auto&f:antiAlias)f.reset();for(auto&f:postLP)f.reset();
   gateEnv=previousInput=0;
-  fastEnv=slowEnv=sagEnv=attackMemory=widthPrev=0;
-  widthDelay.fill(0.0f);widthIndex=0;
+  fastEnv=slowEnv=sagEnv=attackMemory=attackEnv=0;
   dryRms2=wetRms2=1e-8;autoGain=1.0;
  }
 };
@@ -112,7 +108,7 @@ struct GrowlForge{
  }
 
  bool additionsZero()const{
-  for(clap_id id=Bloom;id<=StereoWidth;++id)if(p[id].load()>1e-9)return false;
+  for(clap_id id=Bloom;id<=Attack;++id)if(p[id].load()>1e-9)return false;
   return true;
  }
 
@@ -193,15 +189,14 @@ struct GrowlForge{
  }
 
 
- float applyNewEffects(float dry,float wet,float low,float growlBand,float high,ChannelDSP&c,int ci){
+ float applyNewEffects(float dry,float wet,float low,float growlBand,float high,ChannelDSP&c){
   const double bloom=p[Bloom].load()/10.0;
   const double sag=p[Sag].load()/10.0;
   const double dynamics=p[Dynamics].load()/10.0;
   const double texture=p[Texture].load()/10.0;
   const double attack=p[Attack].load()/10.0;
-  const double width=p[StereoWidth].load()/10.0;
 
-  if(bloom+sag+dynamics+texture+attack+width<=0.0)return wet;
+  if(bloom+sag+dynamics+texture+attack<=0.0)return wet;
 
   const float level=std::abs(dry);
   const float fastA=(float)std::exp(-1.0/(0.004*sampleRate));
@@ -252,27 +247,28 @@ struct GrowlForge{
   }
 
   if(attack>0.0){
-   const double transient=clamp((c.fastEnv-c.slowEnv)/(c.fastEnv+0.006f),0.0,1.0);
+   // Two-part transient enhancement:
+   // 1) a fast edge component for pick definition;
+   // 2) a short envelope-shaped body lift so the effect is audible
+   //    without becoming only a high-frequency click.
+   const double transient=clamp((c.fastEnv-c.slowEnv)/(c.fastEnv+0.004f),0.0,1.0);
+   const float envTarget=(float)transient;
+   const float attackCoeff=(float)std::exp(-1.0/(0.0015*sampleRate));
+   const float releaseCoeff=(float)std::exp(-1.0/(0.038*sampleRate));
+   c.attackEnv=envTarget>c.attackEnv
+      ? attackCoeff*c.attackEnv+(1.0f-attackCoeff)*envTarget
+      : releaseCoeff*c.attackEnv+(1.0f-releaseCoeff)*envTarget;
+
    const float edge=y-c.attackMemory;
-   y+=(float)(edge*attack*transient*(0.45+0.55*attack));
+   const double edgeGain=attack*(0.90+1.10*attack);
+   const double bodyGain=attack*(0.12+0.30*attack);
+   const float attackBody=0.55f*y+0.30f*high+0.15f*growlBand;
+
+   y+=(float)(edge*edgeGain*c.attackEnv);
+   y+=(float)(attackBody*bodyGain*c.attackEnv);
   }
 
   c.attackMemory=wet;
-
-  if(width>0.0){
-   const uint32_t maxDelay=(uint32_t)clamp(sampleRate*0.00085,8.0,56.0);
-   const uint32_t delaySamples=4u+(uint32_t)std::round(width*(maxDelay-4u));
-   c.widthDelay[c.widthIndex]=y;
-   const uint32_t read=(c.widthIndex+64u-delaySamples)%64u;
-   const float delayed=c.widthDelay[read];
-   c.widthIndex=(c.widthIndex+1u)%64u;
-
-   const float decorrelated=(y-delayed)-0.55f*c.widthPrev;
-   c.widthPrev=decorrelated;
-   const float polarity=ci==0?1.0f:-1.0f;
-   y+=polarity*decorrelated*(float)(width*(0.08+0.20*width));
-  }
-
   return y;
  }
 
@@ -324,7 +320,7 @@ struct GrowlForge{
   if(smooth>0){y-=airBand*(float)(0.88*smooth);y-=presenceBand*(float)(0.24*smooth);}
   if(preCab>0)for(auto&f:c.postLP)y=f.lp(y);
 
-  y=applyNewEffects(x,y,low,growlBand,high,c,ci);
+  y=applyNewEffects(x,y,low,growlBand,high,c);
   y=applyAutoGain(x,y,c);
   y=(float)(y*(1-parallel)+x*parallel);
   y=(float)(y*dbToGain(outputDb));
@@ -445,9 +441,8 @@ bool textValue(const clap_plugin_t*,clap_id id,const char*t,double*v){
 void paramFlush(const clap_plugin_t*p,const clap_input_events_t*i,const clap_output_events_t*){handleEvents(self(p),i);}
 const clap_plugin_params_t paramsExt{paramCount,paramInfo,paramValue,valueText,textValue,paramFlush};
 
-struct StateHeader{uint32_t magic=0x47465247,version=8;};
-struct StateBlob{uint32_t magic=0x47465247,version=8;double values[kParamCount]{};};
-struct StateBlobV7{uint32_t magic=0x47465247,version=7;double values[21]{};};
+struct StateHeader{uint32_t magic=0x47465247,version=9;};
+struct StateBlob{uint32_t magic=0x47465247,version=9;double values[kParamCount]{};};
 
 bool stateSave(const clap_plugin_t*p,const clap_ostream_t*s){
  if(!s||!s->write)return false;StateBlob b;for(size_t i=0;i<kParamCount;++i)b.values[i]=self(p)->p[i];
@@ -461,14 +456,16 @@ bool stateLoad(const clap_plugin_t*p,const clap_istream_t*s){
  std::array<double,kParamCount> loaded{};
  for(size_t i=0;i<kParamCount;++i)loaded[i]=defs[i].def;
 
- if(h.version==8){
-  std::array<double,kParamCount> tail{};
-  if(s->read(s,tail.data(),sizeof(double)*kParamCount)!=(int64_t)(sizeof(double)*kParamCount))return false;
-  loaded=tail;
+ if(h.version==9){
+  if(s->read(s,loaded.data(),sizeof(double)*kParamCount)!=(int64_t)(sizeof(double)*kParamCount))return false;
+ }else if(h.version==8){
+  std::array<double,28> old{};
+  if(s->read(s,old.data(),sizeof(double)*28)!=(int64_t)(sizeof(double)*28))return false;
+  for(size_t i=0;i<kParamCount;++i)loaded[i]=old[i];
  }else if(h.version==7){
-  std::array<double,21> tail{};
-  if(s->read(s,tail.data(),sizeof(double)*21)!=(int64_t)(sizeof(double)*21))return false;
-  for(size_t i=0;i<21;++i)loaded[i]=tail[i];
+  std::array<double,21> old{};
+  if(s->read(s,old.data(),sizeof(double)*21)!=(int64_t)(sizeof(double)*21))return false;
+  for(size_t i=0;i<21;++i)loaded[i]=old[i];
  }else return false;
 
  for(size_t i=0;i<kParamCount;++i){
@@ -489,8 +486,8 @@ void plugMain(const clap_plugin_t*){}
 
 const char*features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
 const clap_plugin_descriptor_t desc{
- CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.3.0",
- "Post-amp guitar enhancer with additive motion, texture and stereo controls.",features
+ CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.3.1",
+ "Post-amp guitar enhancer with additive motion and texture controls.",features
 };
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}
 const clap_plugin_descriptor_t*factoryDesc(const clap_plugin_factory_t*,uint32_t i){return i==0?&desc:nullptr;}
