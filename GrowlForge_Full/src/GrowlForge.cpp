@@ -55,6 +55,12 @@ inline double dbToGain(double db){return std::pow(10.0,db/20.0);}
 inline double clamp(double x,double a,double b){return std::max(a,std::min(b,x));}
 inline double gainToDb(double gain){return 20.0*std::log10(std::max(gain,1.0e-9));}
 inline double quantize01(double value){return std::round(value*10.0)/10.0;}
+inline double extremeCurve(double normalized,double start,double amount){
+ normalized=clamp(normalized,0.0,1.0);
+ if(normalized<=start)return normalized;
+ const double t=(normalized-start)/(1.0-start);
+ return clamp(normalized+amount*t*t,0.0,1.5);
+}
 inline float zap(float x){return std::abs(x)<1e-20f?0.0f:x;}
 
 struct OnePole{
@@ -330,14 +336,14 @@ bool textValue(const clap_plugin_t*,clap_id id,const char*t,double*v){
 void paramFlush(const clap_plugin_t*p,const clap_input_events_t*i,const clap_output_events_t*){handleEvents(self(p),i);}
 const clap_plugin_params_t paramsExt{paramCount,paramInfo,paramValue,valueText,textValue,paramFlush};
 
-struct StateBlob{uint32_t magic=0x47465247,version=6;double values[kParamCount]{};};
+struct StateBlob{uint32_t magic=0x47465247,version=7;double values[kParamCount]{};};
 bool stateSave(const clap_plugin_t*p,const clap_ostream_t*s){
  if(!s||!s->write)return false;StateBlob b;for(size_t i=0;i<kParamCount;++i)b.values[i]=self(p)->p[i];
  return s->write(s,&b,sizeof(b))==(int64_t)sizeof(b);
 }
 bool stateLoad(const clap_plugin_t*p,const clap_istream_t*s){
  if(!s||!s->read)return false;StateBlob b;
- if(s->read(s,&b,sizeof(b))!=(int64_t)sizeof(b)||b.magic!=0x47465247||b.version!=6)return false;
+ if(s->read(s,&b,sizeof(b))!=(int64_t)sizeof(b)||b.magic!=0x47465247||b.version!=7)return false;
  for(size_t i=0;i<kParamCount;++i){
   if(i==AutoGainCorrection||i==ApplyAutoGain){self(p)->p[i]=0.0;continue;}
   double value=clamp(b.values[i],defs[i].min,defs[i].max);
@@ -355,8 +361,8 @@ void plugMain(const clap_plugin_t*){}
 
 const char*features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
 const clap_plugin_descriptor_t desc{
- CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.2.3",
- "Post-amp guitar enhancer with neutral-reference Auto-Gain measurement.",features
+ CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.2.4",
+ "Post-amp guitar enhancer with stronger Body, Punch and exaggerated high control ranges.",features
 };
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}
 const clap_plugin_descriptor_t*factoryDesc(const clap_plugin_factory_t*,uint32_t i){return i==0?&desc:nullptr;}

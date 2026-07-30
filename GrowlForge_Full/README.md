@@ -1,4 +1,4 @@
-# GrowlForge 1.2.3
+# GrowlForge 1.2.4
 
 Post-amp guitar enhancer:
 
@@ -85,3 +85,12 @@ When `Auto-Gain` is enabled, `Output` is immediately reset to `0 dB`.
 This gives the loudness matcher a neutral reference and prevents previously
 committed or manually entered Output gain from contaminating the measurement.
 The internal RMS history is reset at the same time.
+
+
+## 1.2.4 voicing changes
+
+- `Body` is substantially stronger, especially from the middle to maximum range.
+- `Punch` produces a more obvious attack and low-mid impact.
+- `Tight` keeps a familiar lower range but accelerates above roughly `7`.
+- `Drive`, `Grind`, and `Fuzz` become more exaggerated from roughly `8–10`.
+- The design target remains: `0` is neutral, while `10` is intentionally oversized.
