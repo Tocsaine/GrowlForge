@@ -9,14 +9,16 @@
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
-constexpr uint32_t kParamCount = 27;
+constexpr uint32_t kParamCount = 36;
 constexpr int kOversample = 4;
 
 enum ParamId : clap_id {
  Input=0, Gate, Tight, Punch, Body, Mass, Growl, Drive, Grind, Fuzz,
  Bite, Presence, Air, Smooth, PreCab, ParallelDry, Output, Ceiling, AutoGain,
  AutoGainCorrection, ApplyAutoGain,
- Bloom, Sag, Dynamics, Texture, Focus, Attack
+ Bloom, Sag, Dynamics, Texture, Focus, Attack,
+ Resonance, Compression, HarmonicBias, X2,
+ MeterSaturation, MeterBloom, MeterCompression, MeterSag, MeterAttack
 };
 
 struct ParamDef {
@@ -55,7 +57,16 @@ constexpr std::array<ParamDef,kParamCount> defs{{
  {Dynamics,"Dynamics","Motion",0,10,0,"",kAuto},
  {Texture,"Texture","Character",0,10,0,"",kAuto},
  {Focus,"Focus","Character",0,10,0,"",kAuto},
- {Attack,"Attack","Motion",0,10,0,"",kAuto}
+ {Attack,"Attack","Motion",0,10,0,"",kAuto},
+ {Resonance,"Resonance","Enhancers",0,10,0,"",kAuto},
+ {Compression,"Compression","Dynamics",0,10,0,"",kAuto},
+ {HarmonicBias,"Harmonic Bias","Character",0,10,0,"",kAuto},
+ {X2,"x2","Enhancers",0,1,0,"",kToggle},
+ {MeterSaturation,"Saturation Activity","Indicator",0,100,0," %",kReadOnly},
+ {MeterBloom,"Bloom Activity","Indicator",0,100,0," %",kReadOnly},
+ {MeterCompression,"Compression Activity","Indicator",0,100,0," %",kReadOnly},
+ {MeterSag,"Sag Activity","Indicator",0,100,0," %",kReadOnly},
+ {MeterAttack,"Attack Activity","Indicator",0,100,0," %",kReadOnly}
 }};
 
 inline double dbToGain(double db){return std::pow(10.0,db/20.0);}
@@ -79,18 +90,20 @@ struct OnePole{
 };
 
 struct ChannelDSP{
- OnePole tightHP,low180,low650,low1600,presenceLP,airLP,fuzzLow;
+ OnePole tightHP,low110,low180,low650,low1600,presenceLP,airLP,fuzzLow;
  std::array<OnePole,4> antiAlias;
  std::array<OnePole,2> postLP;
  float gateEnv=0,previousInput=0;
- float fastEnv=0,slowEnv=0,sagEnv=0,attackMemory=0,attackEnv=0;
+ float fastEnv=0,slowEnv=0,sagEnv=0,attackMemory=0,attackEnv=0,compEnv=0;
+ float meterSat=0,meterBloom=0,meterComp=0,meterSag=0,meterAttack=0;
  double dryRms2=1e-8,wetRms2=1e-8,autoGain=1.0;
  void reset(){
-  tightHP.reset();low180.reset();low650.reset();low1600.reset();
+  tightHP.reset();low110.reset();low180.reset();low650.reset();low1600.reset();
   presenceLP.reset();airLP.reset();fuzzLow.reset();
   for(auto&f:antiAlias)f.reset();for(auto&f:postLP)f.reset();
   gateEnv=previousInput=0;
-  fastEnv=slowEnv=sagEnv=attackMemory=attackEnv=0;
+  fastEnv=slowEnv=sagEnv=attackMemory=attackEnv=compEnv=0;
+  meterSat=meterBloom=meterComp=meterSag=meterAttack=0;
   dryRms2=wetRms2=1e-8;autoGain=1.0;
  }
 };
@@ -108,9 +121,12 @@ struct GrowlForge{
  }
 
  bool additionsZero()const{
-  for(clap_id id=Bloom;id<=Attack;++id)if(p[id].load()>1e-9)return false;
+  for(clap_id id=Bloom;id<=HarmonicBias;++id)if(p[id].load()>1e-9)return false;
   return true;
  }
+
+ bool x2Enabled()const{return p[X2].load()>=0.5;}
+ double color(double v)const{return x2Enabled()?2.0*v:v;}
 
  double currentAutoGainDb() const {
   const double average=0.5*(ch[0].autoGain+ch[1].autoGain);
@@ -136,14 +152,14 @@ struct GrowlForge{
  }
 
  void configure(){
-  double tight=p[Tight].load()/10.0,smooth=p[Smooth].load()/10.0,preCab=p[PreCab].load()/10.0;
+  double tight=color(p[Tight].load()/10.0),smooth=color(p[Smooth].load()/10.0),preCab=p[PreCab].load()/10.0;
   double osRate=sampleRate*kOversample;
   double hpHz=45.0+115.0*tight;
   double aaCut=clamp(sampleRate*(0.46-0.23*smooth),5200.0,std::min(20500.0,sampleRate*0.46));
   double openCut=std::min(21000.0,sampleRate*0.46),closedCut=2600.0;
   double postCut=openCut*std::pow(closedCut/openCut,preCab);
   for(auto&c:ch){
-   c.tightHP.setLowpass(hpHz,sampleRate);c.low180.setLowpass(180,sampleRate);
+   c.tightHP.setLowpass(hpHz,sampleRate);c.low110.setLowpass(110,sampleRate);c.low180.setLowpass(180,sampleRate);
    c.low650.setLowpass(650,sampleRate);c.low1600.setLowpass(1600,sampleRate);
    c.presenceLP.setLowpass(2600,sampleRate);c.airLP.setLowpass(6500,sampleRate);
    for(auto&f:c.antiAlias)f.setLowpass(aaCut,osRate);
@@ -152,10 +168,11 @@ struct GrowlForge{
  }
 
  float nonlinear(float x,float low,float growlBand,float high,ChannelDSP&c){
-  double mass=p[Mass].load()/10.0,growl=p[Growl].load()/10.0,drive=p[Drive].load()/10.0;
-  double grind=p[Grind].load()/10.0,fuzz=p[Fuzz].load()/10.0,bite=p[Bite].load()/10.0;
+  double mass=color(p[Mass].load()/10.0),growl=color(p[Growl].load()/10.0),drive=color(p[Drive].load()/10.0);
+  double grind=color(p[Grind].load()/10.0),fuzz=color(p[Fuzz].load()/10.0),bite=color(p[Bite].load()/10.0);
+  double harmonicBias=color(p[HarmonicBias].load()/10.0);
   double focus=p[Focus].load()/10.0;
-  if(mass+growl+drive+grind+fuzz+bite<=0){c.previousInput=x;return x;}
+  if(mass+growl+drive+grind+fuzz+bite+harmonicBias<=0){c.previousInput=x;c.meterSat*=0.995f;return x;}
 
   if(focus>0.0){
    const float focused=0.18f*low+1.42f*growlBand+0.42f*high;
@@ -166,6 +183,11 @@ struct GrowlForge{
   double growlH=3.10*growl*growlBand*std::abs((double)growlBand);
   double biteH=1.45*bite*high*high*high;
   float target=(float)(x+massH+growlH+biteH);
+  if(harmonicBias>0.0){
+   const double even=target*std::abs((double)target);
+   const double biasMix=clamp(0.34*harmonicBias,0.0,0.68);
+   target=(float)(target*(1.0-biasMix)+std::tanh(target+2.4*even)*biasMix);
+  }
 
   double pre=1+16*drive+9*grind+2.5*growl+1.5*bite;
   double pos=1+0.42*grind+0.18*growl,neg=1-0.28*grind,fuzzGain=5+58*fuzz;
@@ -185,18 +207,25 @@ struct GrowlForge{
 
    float filtered=(float)y;for(auto&f:c.antiAlias)filtered=f.lp(filtered);out=filtered;
   }
+  const float satTarget=(float)(100.0*clamp(0.45*drive+0.34*grind+0.28*fuzz+0.18*growl+0.16*harmonicBias,0.0,1.0));
+  c.meterSat+=0.02f*(satTarget-c.meterSat);
   c.previousInput=target;return out;
  }
 
 
  float applyNewEffects(float dry,float wet,float low,float growlBand,float high,ChannelDSP&c){
-  const double bloom=p[Bloom].load()/10.0;
-  const double sag=p[Sag].load()/10.0;
-  const double dynamics=p[Dynamics].load()/10.0;
-  const double texture=p[Texture].load()/10.0;
-  const double attack=p[Attack].load()/10.0;
+  const double bloom=color(p[Bloom].load()/10.0);
+  const double sag=color(p[Sag].load()/10.0);
+  const double dynamics=color(p[Dynamics].load()/10.0);
+  const double texture=color(p[Texture].load()/10.0);
+  const double attack=color(p[Attack].load()/10.0);
+  const double resonance=color(p[Resonance].load()/10.0);
+  const double compression=color(p[Compression].load()/10.0);
 
-  if(bloom+sag+dynamics+texture+attack<=0.0)return wet;
+  if(bloom+sag+dynamics+texture+attack+resonance+compression<=0.0){
+   c.meterBloom*=0.995f;c.meterComp*=0.995f;c.meterSag*=0.995f;c.meterAttack*=0.995f;
+   return wet;
+  }
 
   const float level=std::abs(dry);
   const float fastA=(float)std::exp(-1.0/(0.004*sampleRate));
@@ -210,6 +239,13 @@ struct GrowlForge{
                              slowR*c.slowEnv+(1-slowR)*level;
 
   float y=wet;
+
+  if(resonance>0.0){
+   const float resonantLow=c.low110.lp(y);
+   const double hit=clamp((c.fastEnv-0.018f)/0.22f,0.0,1.0);
+   const double amount=clamp(resonance*(0.08+0.22*hit),0.0,0.55);
+   y+=(float)(resonantLow*amount);
+  }
 
   if(dynamics>0.0){
    const double playing=clamp((c.fastEnv-0.004f)/0.16f,0.0,1.0);
@@ -225,6 +261,7 @@ struct GrowlForge{
    const double bloomAmount=bloom*decay*active;
    const double harmonic=std::tanh((y+0.32f*growlBand)*3.1);
    y=(float)(y*(1.0-0.34*bloomAmount)+harmonic*(0.34*bloomAmount));
+   const float mt=(float)(100.0*clamp(bloomAmount,0.0,1.0));c.meterBloom+=0.025f*(mt-c.meterBloom);
   }
 
   if(sag>0.0){
@@ -236,6 +273,21 @@ struct GrowlForge{
    const double sagGain=1.0-sag*(0.06+0.24*demand*demand);
    const double recoveryWarmth=sag*0.10*(1.0-demand);
    y=(float)(y*sagGain+std::tanh((y+0.20f*low)*1.8)*recoveryWarmth);
+   const float mt=(float)(100.0*clamp(sag*demand,0.0,1.0));c.meterSag+=0.02f*(mt-c.meterSag);
+  }
+
+  if(compression>0.0){
+   const float compA=(float)std::exp(-1.0/(0.010*sampleRate));
+   const float compR=(float)std::exp(-1.0/(0.180*sampleRate));
+   const float ay=std::abs(y);
+   c.compEnv=ay>c.compEnv?compA*c.compEnv+(1-compA)*ay:compR*c.compEnv+(1-compR)*ay;
+   const double over=clamp((c.compEnv-0.055f)/0.32f,0.0,1.0);
+   const double reduction=compression*(0.05+0.25*over);
+   const double makeup=1.0+compression*(0.025+0.075*over);
+   const float compressed=(float)(y*(1.0-reduction)*makeup);
+   const double glueMix=clamp(compression*(0.22+0.28*compression),0.0,0.78);
+   y=(float)(y*(1.0-glueMix)+compressed*glueMix);
+   const float mt=(float)(100.0*clamp(compression*over,0.0,1.0));c.meterComp+=0.018f*(mt-c.meterComp);
   }
 
   if(texture>0.0){
@@ -266,8 +318,11 @@ struct GrowlForge{
 
    y+=(float)(edge*edgeGain*c.attackEnv);
    y+=(float)(attackBody*bodyGain*c.attackEnv);
+   const float mt=(float)(100.0*clamp(attack*c.attackEnv,0.0,1.0));c.meterAttack+=0.03f*(mt-c.meterAttack);
   }
 
+  if(bloom<=0)c.meterBloom*=0.995f;if(compression<=0)c.meterComp*=0.995f;
+  if(sag<=0)c.meterSag*=0.995f;if(attack<=0)c.meterAttack*=0.995f;
   c.attackMemory=wet;
   return y;
  }
@@ -286,9 +341,9 @@ struct GrowlForge{
  float processSample(float in,int ci){
   auto&c=ch[ci];
   double inputDb=p[Input].load(),outputDb=p[Output].load(),gate=p[Gate].load()/10.0;
-  double tight=p[Tight].load()/10.0,punch=p[Punch].load()/10.0,body=p[Body].load()/10.0;
-  double mass=p[Mass].load()/10.0,growl=p[Growl].load()/10.0,bite=p[Bite].load()/10.0;
-  double presence=p[Presence].load()/10.0,air=p[Air].load()/10.0,smooth=p[Smooth].load()/10.0;
+  double tight=color(p[Tight].load()/10.0),punch=color(p[Punch].load()/10.0),body=color(p[Body].load()/10.0);
+  double mass=color(p[Mass].load()/10.0),growl=color(p[Growl].load()/10.0),bite=color(p[Bite].load()/10.0);
+  double presence=color(p[Presence].load()/10.0),air=color(p[Air].load()/10.0),smooth=color(p[Smooth].load()/10.0);
   double preCab=p[PreCab].load()/10.0,parallel=p[ParallelDry].load()/100.0;
   float original=in,x=(float)(in*dbToGain(inputDb));
 
@@ -330,6 +385,11 @@ struct GrowlForge{
    double cg=dbToGain(ceiling),n=y/std::max(cg,1e-6);
    y=(float)(std::tanh(n*1.35)/std::tanh(1.35)*cg);
   }
+  p[MeterSaturation]=clamp(0.5*(ch[0].meterSat+ch[1].meterSat),0.0,100.0);
+  p[MeterBloom]=clamp(0.5*(ch[0].meterBloom+ch[1].meterBloom),0.0,100.0);
+  p[MeterCompression]=clamp(0.5*(ch[0].meterComp+ch[1].meterComp),0.0,100.0);
+  p[MeterSag]=clamp(0.5*(ch[0].meterSag+ch[1].meterSag),0.0,100.0);
+  p[MeterAttack]=clamp(0.5*(ch[0].meterAttack+ch[1].meterAttack),0.0,100.0);
   return (float)clamp(y,-4.0,4.0);
  }
 };
@@ -343,10 +403,10 @@ void handleEvents(GrowlForge*s,const clap_input_events_t*ev){
   auto*h=ev->get(ev,i);
   if(!h||h->space_id!=CLAP_CORE_EVENT_SPACE_ID||h->type!=CLAP_EVENT_PARAM_VALUE)continue;
   auto*v=reinterpret_cast<const clap_event_param_value_t*>(h);
-  if(v->param_id>=kParamCount||v->param_id==AutoGainCorrection)continue;
+  if(v->param_id>=kParamCount||v->param_id==AutoGainCorrection||v->param_id>=MeterSaturation)continue;
 
   double x=clamp(v->value,defs[v->param_id].min,defs[v->param_id].max);
-  if(v->param_id==AutoGain||v->param_id==ApplyAutoGain){
+  if(v->param_id==AutoGain||v->param_id==ApplyAutoGain||v->param_id==X2){
    x=x>=0.5?1.0:0.0;
   }else{
    x=quantize01(x);
@@ -420,14 +480,14 @@ bool paramValue(const clap_plugin_t*p,clap_id id,double*v){
 }
 bool valueText(const clap_plugin_t*,clap_id id,double v,char*d,uint32_t n){
  if(id>=kParamCount||!d||!n)return false;
- if(id==AutoGain)std::snprintf(d,n,"%s",v>=0.5?"On":"Off");
+ if(id==AutoGain||id==X2)std::snprintf(d,n,"%s",v>=0.5?"On":"Off");
  else if(id==ApplyAutoGain)std::snprintf(d,n,"%s",v>=0.5?"Apply":"Ready");
  else std::snprintf(d,n,"%.1f%s",v,defs[id].unit);
  return true;
 }
 bool textValue(const clap_plugin_t*,clap_id id,const char*t,double*v){
  if(id>=kParamCount||!t||!v||id==AutoGainCorrection)return false;
- if(id==AutoGain||id==ApplyAutoGain){
+ if(id==AutoGain||id==ApplyAutoGain||id==X2){
   *v=(!std::strcmp(t,"On")||!std::strcmp(t,"on")||!std::strcmp(t,"Apply")||
       !std::strcmp(t,"apply")||!std::strcmp(t,"1"))?1.0:0.0;
   return true;
@@ -441,40 +501,36 @@ bool textValue(const clap_plugin_t*,clap_id id,const char*t,double*v){
 void paramFlush(const clap_plugin_t*p,const clap_input_events_t*i,const clap_output_events_t*){handleEvents(self(p),i);}
 const clap_plugin_params_t paramsExt{paramCount,paramInfo,paramValue,valueText,textValue,paramFlush};
 
-struct StateHeader{uint32_t magic=0x47465247,version=9;};
-struct StateBlob{uint32_t magic=0x47465247,version=9;double values[kParamCount]{};};
+struct StateHeader{uint32_t magic=0x47465247,version=10;};
+struct StateBlob{uint32_t magic=0x47465247,version=10;double values[kParamCount]{};};
 
 bool stateSave(const clap_plugin_t*p,const clap_ostream_t*s){
- if(!s||!s->write)return false;StateBlob b;for(size_t i=0;i<kParamCount;++i)b.values[i]=self(p)->p[i];
+ if(!s||!s->write)return false;StateBlob b;
+ for(size_t i=0;i<kParamCount;++i)b.values[i]=(i>=MeterSaturation)?0.0:self(p)->p[i].load();
  return s->write(s,&b,sizeof(b))==(int64_t)sizeof(b);
 }
 bool stateLoad(const clap_plugin_t*p,const clap_istream_t*s){
- if(!s||!s->read)return false;
- StateHeader h;
+ if(!s||!s->read)return false;StateHeader h;
  if(s->read(s,&h,sizeof(h))!=(int64_t)sizeof(h)||h.magic!=0x47465247)return false;
-
- std::array<double,kParamCount> loaded{};
- for(size_t i=0;i<kParamCount;++i)loaded[i]=defs[i].def;
-
- if(h.version==9){
+ std::array<double,kParamCount> loaded{};for(size_t i=0;i<kParamCount;++i)loaded[i]=defs[i].def;
+ if(h.version==10){
   if(s->read(s,loaded.data(),sizeof(double)*kParamCount)!=(int64_t)(sizeof(double)*kParamCount))return false;
+ }else if(h.version==9){
+  std::array<double,27> old{};if(s->read(s,old.data(),sizeof(old))!=(int64_t)sizeof(old))return false;
+  for(size_t i=0;i<old.size();++i)loaded[i]=old[i];
  }else if(h.version==8){
-  std::array<double,28> old{};
-  if(s->read(s,old.data(),sizeof(double)*28)!=(int64_t)(sizeof(double)*28))return false;
-  for(size_t i=0;i<kParamCount;++i)loaded[i]=old[i];
+  std::array<double,28> old{};if(s->read(s,old.data(),sizeof(old))!=(int64_t)sizeof(old))return false;
+  for(size_t i=0;i<27;++i)loaded[i]=old[i];
  }else if(h.version==7){
-  std::array<double,21> old{};
-  if(s->read(s,old.data(),sizeof(double)*21)!=(int64_t)(sizeof(double)*21))return false;
-  for(size_t i=0;i<21;++i)loaded[i]=old[i];
+  std::array<double,21> old{};if(s->read(s,old.data(),sizeof(old))!=(int64_t)sizeof(old))return false;
+  for(size_t i=0;i<old.size();++i)loaded[i]=old[i];
  }else return false;
-
  for(size_t i=0;i<kParamCount;++i){
-  if(i==AutoGainCorrection||i==ApplyAutoGain){self(p)->p[i]=0.0;continue;}
+  if(i==AutoGainCorrection||i==ApplyAutoGain||i>=MeterSaturation){self(p)->p[i]=0.0;continue;}
   double value=clamp(loaded[i],defs[i].min,defs[i].max);
-  self(p)->p[i]=(i==AutoGain)?(value>=0.5?1.0:0.0):quantize01(value);
+  self(p)->p[i]=(i==AutoGain||i==X2)?(value>=0.5?1.0:0.0):quantize01(value);
  }
- for(auto&c:self(p)->ch)c.reset();
- self(p)->configure();return true;
+ for(auto&c:self(p)->ch)c.reset();self(p)->configure();return true;
 }
 const clap_plugin_state_t stateExt{stateSave,stateLoad};
 
@@ -486,8 +542,8 @@ void plugMain(const clap_plugin_t*){}
 
 const char*features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
 const clap_plugin_descriptor_t desc{
- CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.3.1",
- "Post-amp guitar enhancer with additive motion and texture controls.",features
+ CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.4.0",
+ "Post-amp guitar enhancer with resonance, compression, harmonic control and live activity indicators.",features
 };
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}
 const clap_plugin_descriptor_t*factoryDesc(const clap_plugin_factory_t*,uint32_t i){return i==0?&desc:nullptr;}

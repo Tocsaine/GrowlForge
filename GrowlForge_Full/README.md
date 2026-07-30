@@ -1,4 +1,4 @@
-# GrowlForge 1.3.1
+# GrowlForge 1.4.0
 
 Post-amp guitar enhancer:
 
@@ -124,3 +124,16 @@ when an older state is restored.
 - The maximum Attack effect is roughly twice as strong as in v1.3.0.
 - All other controls and the v1.3.0 voicing remain unchanged.
 - State versions 7 and 8 remain loadable. The removed Stereo Width value is ignored.
+
+
+## 1.4.0
+
+Added without changing parameter IDs 0-26 or the DSP path when the new controls are neutral:
+
+- Resonance: dynamic 110 Hz cabinet-style low resonance.
+- Compression: parallel glue compression that preserves the initial pick attack.
+- Harmonic Bias: progressively adds asymmetric/even-harmonic coloration.
+- x2: doubles artistic/coloring depths while leaving Input, Output, Gate, Focus, Parallel Dry, Ceiling, Auto-Gain and Pre-Cab unchanged.
+- Indicator section: live read-only Saturation, Bloom, Compression, Sag and Attack activity meters for hosts using the generic CLAP parameter interface.
+
+All new controls default to zero/off. State versions 7, 8 and 9 remain loadable.
