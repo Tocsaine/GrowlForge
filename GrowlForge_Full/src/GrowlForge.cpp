@@ -169,10 +169,9 @@ struct GrowlForge{
 
  float nonlinear(float x,float low,float growlBand,float high,ChannelDSP&c){
   double mass=color(p[Mass].load()/10.0),growl=color(p[Growl].load()/10.0);
-  // Drive keeps a predictable 0..10 amount. x2 increases its character
-  // (asymmetry, harmonic complexity and touch response), not raw gain.
+  // Drive keeps a predictable 0..10 amount and is deliberately excluded
+  // from x2. Its voicing is identical whether x2 is off or on.
   const double drive=clamp(p[Drive].load()/10.0,0.0,1.0);
-  const double driveCharacter=x2Enabled()?2.0:1.0;
   double grind=color(p[Grind].load()/10.0),fuzz=color(p[Fuzz].load()/10.0),bite=color(p[Bite].load()/10.0);
   double harmonicBias=color(p[HarmonicBias].load()/10.0);
   double focus=p[Focus].load()/10.0;
@@ -213,16 +212,16 @@ struct GrowlForge{
    // A broad mid push gives the clipping stage body and teeth. At high Drive a
    // small amount of deep low end is removed before the harder stage so palm
    // mutes stay compact instead of turning into loose clipping.
-   const double midEmphasis=drive*(0.15+0.27*drive)*driveCharacter;
+   const double midEmphasis=drive*(0.15+0.27*drive);
    const double lowCleanup=drive*drive*(0.035+0.055*drive);
-   driveInput+=(float)(growlBand*midEmphasis+high*(0.035*drive*driveCharacter)-low*lowCleanup);
+   driveInput+=(float)(growlBand*midEmphasis+high*(0.035*drive)-low*lowCleanup);
   }
 
   // Raise the useful middle of the control without introducing a perceptible
   // step or dead zone. Drive 5 now carries roughly two thirds of the available
   // internal pressure rather than behaving like a weak preamp trim.
   const double driveShape=clamp(drive+0.52*drive*(1.0-drive),0.0,1.0);
-  const double touchGain=1.0+driveShape*(0.72+1.05*driveShape)*driveTransient*driveCharacter;
+  const double touchGain=1.0+driveShape*(0.72+1.05*driveShape)*driveTransient;
   double pre=1+18.5*driveShape+11.0*driveShape*driveShape+9*grind+2.5*growl+1.5*bite;
   double pos=1+0.42*grind+0.18*growl,neg=1-0.28*grind,fuzzGain=5+58*fuzz;
   float out=0,start=c.previousInput;
@@ -234,10 +233,10 @@ struct GrowlForge{
 
    // First stage: responsive overdrive with a progressively asymmetric voice.
    const double symmetric=std::tanh(driven*pre);
-   const double asymmetry=driveShape*driveShape*(0.12+0.30*driveShape)*driveCharacter;
+   const double asymmetry=driveShape*driveShape*(0.12+0.30*driveShape);
    const double biased=driven+asymmetry*(0.42+0.58*std::abs(driven));
    const double asymmetric=std::tanh(biased*pre*(driven>=0?1.0+0.24*asymmetry:1.0-0.17*asymmetry));
-   const double characterMix=clamp(driveShape*(0.10+0.40*driveShape)*driveCharacter,0.0,0.78);
+   const double characterMix=clamp(driveShape*(0.10+0.40*driveShape),0.0,0.78);
    const double firstStage=symmetric*(1.0-characterMix)+asymmetric*characterMix;
 
    // Second stage: fades in above roughly Drive 5.5 and moves the top of the
@@ -247,10 +246,9 @@ struct GrowlForge{
    const double hardStart=clamp((driveShape-0.58)/0.42,0.0,1.0);
    const double hardCurve=hardStart*hardStart*(3.0-2.0*hardStart);
    const double transientRelief=1.0-driveTransient*(0.46+0.16*driveShape);
-   const double x2Hard=x2Enabled()?1.32:1.0;
-   const double hardMix=clamp(hardCurve*(0.72*x2Hard)*transientRelief,0.0,0.88);
-   const double hardInput=firstStage*(1.75+2.45*driveShape*x2Hard);
-   const double hardAsym=asymmetry*(x2Enabled()?1.20:0.82);
+   const double hardMix=clamp(hardCurve*0.72*transientRelief,0.0,0.88);
+   const double hardInput=firstStage*(1.75+2.45*driveShape);
+   const double hardAsym=asymmetry*0.82;
    const double hardStage=0.72*std::tanh(hardInput+hardAsym)+0.28*std::tanh(hardInput*1.85-hardAsym*0.55);
    const double driveSat=firstStage*(1.0-hardMix)+hardStage*hardMix;
 
@@ -270,16 +268,8 @@ struct GrowlForge{
    // prevents a large loudness jump without cancelling the new mid-range gain.
    const double normalization=std::sqrt(1+0.23*(pre-1)*amount);
 
-   // x2 pushes more signal into the harder clipping path. Once that path is
-   // saturated its peak level stops growing, while the normalization above
-   // continues to increase with Drive. Compensate only that predictable x2
-   // energy loss so raising Drive no longer produces a loudness dip. The
-   // correction is smooth, bounded and exactly neutral when Drive is zero or
-   // x2 is disabled; it does not alter the clipping character itself.
-   const double x2DriveMakeup=x2Enabled()
-      ?clamp(1.0+0.15*amount*(driveShape+hardCurve),1.0,1.27)
-      :1.0;
-   double y=(main*(1-fm)+intelligent*fm)*x2DriveMakeup/normalization;
+   // Drive is excluded from x2, so no x2-specific makeup is needed here.
+   double y=(main*(1-fm)+intelligent*fm)/normalization;
 
    float filtered=(float)y;for(auto&f:c.antiAlias)filtered=f.lp(filtered);out=filtered;
   }
@@ -618,7 +608,7 @@ void plugMain(const clap_plugin_t*){}
 
 const char*features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
 const clap_plugin_descriptor_t desc{
- CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.4.3",
+ CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.4.4",
  "Post-amp guitar enhancer with resonance, compression, harmonic control and live activity indicators.",features
 };
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}

@@ -1,4 +1,4 @@
-# GrowlForge 1.4.3
+# GrowlForge 1.4.4
 
 Post-amp guitar enhancer:
 
@@ -169,3 +169,13 @@ All new controls default to zero/off. State versions 7, 8 and 9 remain loadable.
 - Added a smooth, bounded makeup correction tied only to the extra x2 hard-stage saturation.
 - The correction is exactly neutral at Drive 0 and when x2 is disabled.
 - Drive clipping, transient relief, Compression and all other controls remain unchanged.
+
+## 1.4.4 x2 / Drive separation
+
+- Removed every direct x2 modifier from Drive.
+- Drive pre-emphasis, transient pressure, asymmetry, hard-stage blend and hard-stage input now use the same values whether x2 is off or on.
+- Removed the x2-specific Drive makeup compensation introduced in 1.4.3 because it is no longer required.
+- The normal x2-off Drive sound from 1.4.3 is preserved unchanged.
+- x2 continues to affect the other artistic/coloring controls as before.
+- Parameter IDs and state format are unchanged.
+
