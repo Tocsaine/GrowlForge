@@ -151,6 +151,7 @@ typedef struct clap_plugin_audio_ports {
 
 #define CLAP_EXT_PARAMS "clap.params"
 #define CLAP_PARAM_IS_STEPPED (1u << 0)
+#define CLAP_PARAM_IS_READONLY (1u << 3)
 #define CLAP_PARAM_IS_AUTOMATABLE (1u << 5)
 #define CLAP_PARAM_IS_MODULATABLE (1u << 10)
 typedef struct clap_param_info {

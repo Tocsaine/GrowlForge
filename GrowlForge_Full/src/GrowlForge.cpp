@@ -9,12 +9,13 @@
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
-constexpr uint32_t kParamCount = 19;
+constexpr uint32_t kParamCount = 21;
 constexpr int kOversample = 4;
 
 enum ParamId : clap_id {
  Input=0, Gate, Tight, Punch, Body, Mass, Growl, Drive, Grind, Fuzz,
- Bite, Presence, Air, Smooth, PreCab, ParallelDry, Output, Ceiling, AutoGain
+ Bite, Presence, Air, Smooth, PreCab, ParallelDry, Output, Ceiling, AutoGain,
+ AutoGainCorrection, ApplyAutoGain
 };
 
 struct ParamDef {
@@ -24,6 +25,7 @@ struct ParamDef {
 
 constexpr uint32_t kAuto = CLAP_PARAM_IS_AUTOMATABLE;
 constexpr uint32_t kToggle = CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_IS_STEPPED;
+constexpr uint32_t kReadOnly = CLAP_PARAM_IS_READONLY;
 
 constexpr std::array<ParamDef,kParamCount> defs{{
  {Input,"Input Trim","Gain",-24,12,0," dB",kAuto},
@@ -44,11 +46,15 @@ constexpr std::array<ParamDef,kParamCount> defs{{
  {ParallelDry,"Parallel Dry","Output",0,100,0," %",kAuto},
  {Output,"Output","Output",-24,12,0," dB",kAuto},
  {Ceiling,"Ceiling","Output",-12,0,0," dB",kAuto},
- {AutoGain,"Auto-Gain","Output",0,1,0,"",kToggle}
+ {AutoGain,"Auto-Gain","Output",0,1,0,"",kToggle},
+ {AutoGainCorrection,"Auto-Gain Correction","Output",-12,12,0," dB",kReadOnly},
+ {ApplyAutoGain,"Apply Auto-Gain","Output",0,1,0,"",kToggle}
 }};
 
 inline double dbToGain(double db){return std::pow(10.0,db/20.0);}
 inline double clamp(double x,double a,double b){return std::max(a,std::min(b,x));}
+inline double gainToDb(double gain){return 20.0*std::log10(std::max(gain,1.0e-9));}
+inline double quantize01(double value){return std::round(value*10.0)/10.0;}
 inline float zap(float x){return std::abs(x)<1e-20f?0.0f:x;}
 
 struct OnePole{
@@ -83,6 +89,21 @@ struct GrowlForge{
  bool enhancersZero()const{
   for(clap_id id=Tight;id<=PreCab;++id)if(p[id].load()>1e-9)return false;
   return true;
+ }
+
+
+ double currentAutoGainDb() const {
+  const double average=0.5*(ch[0].autoGain+ch[1].autoGain);
+  return clamp(gainToDb(average),-12.0,12.0);
+ }
+
+ void applyCurrentAutoGain(){
+  const double correction=quantize01(currentAutoGainDb());
+  const double newOutput=quantize01(clamp(p[Output].load()+correction,defs[Output].min,defs[Output].max));
+  p[Output]=newOutput;
+  p[AutoGain]=0.0;
+  p[ApplyAutoGain]=0.0;
+  for(auto&c:ch)c.autoGain=1.0;
  }
 
  void configure(){
@@ -196,15 +217,29 @@ struct GrowlForge{
 GrowlForge*self(const clap_plugin_t*p){return static_cast<GrowlForge*>(p->plugin_data);}
 
 void handleEvents(GrowlForge*s,const clap_input_events_t*ev){
- if(!ev||!ev->size||!ev->get)return;bool changed=false;
+ if(!ev||!ev->size||!ev->get)return;
+ bool changed=false;
  for(uint32_t i=0;i<ev->size(ev);++i){
   auto*h=ev->get(ev,i);
   if(!h||h->space_id!=CLAP_CORE_EVENT_SPACE_ID||h->type!=CLAP_EVENT_PARAM_VALUE)continue;
   auto*v=reinterpret_cast<const clap_event_param_value_t*>(h);
-  if(v->param_id<kParamCount){
-   double x=clamp(v->value,defs[v->param_id].min,defs[v->param_id].max);
-   if(v->param_id==AutoGain)x=x>=0.5?1:0;s->p[v->param_id]=x;changed=true;
+  if(v->param_id>=kParamCount||v->param_id==AutoGainCorrection)continue;
+
+  double x=clamp(v->value,defs[v->param_id].min,defs[v->param_id].max);
+  if(v->param_id==AutoGain||v->param_id==ApplyAutoGain){
+   x=x>=0.5?1.0:0.0;
+  }else{
+   x=quantize01(x);
   }
+
+  if(v->param_id==ApplyAutoGain&&x>=0.5){
+   s->applyCurrentAutoGain();
+   changed=true;
+   continue;
+  }
+
+  s->p[v->param_id]=x;
+  changed=true;
  }
  if(changed)s->configure();
 }
@@ -243,28 +278,47 @@ bool paramInfo(const clap_plugin_t*,uint32_t i,clap_param_info_t*o){
  o->id=d.id;o->flags=d.flags;o->min_value=d.min;o->max_value=d.max;o->default_value=d.def;
  std::snprintf(o->name,sizeof(o->name),"%s",d.name);std::snprintf(o->module,sizeof(o->module),"%s",d.module);return true;
 }
-bool paramValue(const clap_plugin_t*p,clap_id id,double*v){if(id>=kParamCount||!v)return false;*v=self(p)->p[id];return true;}
+bool paramValue(const clap_plugin_t*p,clap_id id,double*v){
+ if(id>=kParamCount||!v)return false;
+ if(id==AutoGainCorrection){*v=self(p)->currentAutoGainDb();return true;}
+ *v=self(p)->p[id];return true;
+}
 bool valueText(const clap_plugin_t*,clap_id id,double v,char*d,uint32_t n){
  if(id>=kParamCount||!d||!n)return false;
- if(id==AutoGain)std::snprintf(d,n,"%s",v>=0.5?"On":"Off");else std::snprintf(d,n,"%.2f%s",v,defs[id].unit);return true;
+ if(id==AutoGain)std::snprintf(d,n,"%s",v>=0.5?"On":"Off");
+ else if(id==ApplyAutoGain)std::snprintf(d,n,"%s",v>=0.5?"Apply":"Ready");
+ else std::snprintf(d,n,"%.1f%s",v,defs[id].unit);
+ return true;
 }
 bool textValue(const clap_plugin_t*,clap_id id,const char*t,double*v){
- if(id>=kParamCount||!t||!v)return false;
- if(id==AutoGain){*v=(!std::strcmp(t,"On")||!std::strcmp(t,"on")||!std::strcmp(t,"1"))?1:0;return true;}
- char*e=nullptr;double x=std::strtod(t,&e);if(e==t)return false;*v=clamp(x,defs[id].min,defs[id].max);return true;
+ if(id>=kParamCount||!t||!v||id==AutoGainCorrection)return false;
+ if(id==AutoGain||id==ApplyAutoGain){
+  *v=(!std::strcmp(t,"On")||!std::strcmp(t,"on")||!std::strcmp(t,"Apply")||
+      !std::strcmp(t,"apply")||!std::strcmp(t,"1"))?1.0:0.0;
+  return true;
+ }
+ char*e=nullptr;
+ double x=std::strtod(t,&e);
+ if(e==t)return false;
+ *v=quantize01(clamp(x,defs[id].min,defs[id].max));
+ return true;
 }
 void paramFlush(const clap_plugin_t*p,const clap_input_events_t*i,const clap_output_events_t*){handleEvents(self(p),i);}
 const clap_plugin_params_t paramsExt{paramCount,paramInfo,paramValue,valueText,textValue,paramFlush};
 
-struct StateBlob{uint32_t magic=0x47465247,version=3;double values[kParamCount]{};};
+struct StateBlob{uint32_t magic=0x47465247,version=4;double values[kParamCount]{};};
 bool stateSave(const clap_plugin_t*p,const clap_ostream_t*s){
  if(!s||!s->write)return false;StateBlob b;for(size_t i=0;i<kParamCount;++i)b.values[i]=self(p)->p[i];
  return s->write(s,&b,sizeof(b))==(int64_t)sizeof(b);
 }
 bool stateLoad(const clap_plugin_t*p,const clap_istream_t*s){
  if(!s||!s->read)return false;StateBlob b;
- if(s->read(s,&b,sizeof(b))!=(int64_t)sizeof(b)||b.magic!=0x47465247||b.version!=3)return false;
- for(size_t i=0;i<kParamCount;++i)self(p)->p[i]=clamp(b.values[i],defs[i].min,defs[i].max);
+ if(s->read(s,&b,sizeof(b))!=(int64_t)sizeof(b)||b.magic!=0x47465247||b.version!=4)return false;
+ for(size_t i=0;i<kParamCount;++i){
+  if(i==AutoGainCorrection||i==ApplyAutoGain){self(p)->p[i]=0.0;continue;}
+  double value=clamp(b.values[i],defs[i].min,defs[i].max);
+  self(p)->p[i]=(i==AutoGain)?(value>=0.5?1.0:0.0):quantize01(value);
+ }
  self(p)->configure();return true;
 }
 const clap_plugin_state_t stateExt{stateSave,stateLoad};
@@ -277,8 +331,8 @@ void plugMain(const clap_plugin_t*){}
 
 const char*features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
 const clap_plugin_descriptor_t desc{
- CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.2.0",
- "Post-amp guitar enhancer with neutral defaults, harmonic shaping and Auto-Gain.",features
+ CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.2.1",
+ "Post-amp guitar enhancer with 0.1 parameter precision, visible Auto-Gain correction and gain commit.",features
 };
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}
 const clap_plugin_descriptor_t*factoryDesc(const clap_plugin_factory_t*,uint32_t i){return i==0?&desc:nullptr;}

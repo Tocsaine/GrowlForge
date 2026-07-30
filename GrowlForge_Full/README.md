@@ -1,4 +1,4 @@
-# GrowlForge 1.2.0
+# GrowlForge 1.2.1
 
 Post-amp guitar enhancer:
 
@@ -61,3 +61,11 @@ Restart the DAW and run a full CLAP rescan.
 ## Compatibility
 
 Version 1.2.0 adds Auto-Gain and uses a new 19-parameter state format.
+
+
+## Precision and Auto-Gain display
+
+- Continuous controls are quantized to `0.1`.
+- Hosts that expose CLAP text editing can pass exact keyboard-entered values.
+- `Auto-Gain Correction` shows the current smoothed correction in dB.
+- Set `Apply Auto-Gain` to `Apply` to add that correction to `Output`, disable Auto-Gain, and reset the temporary correction.
