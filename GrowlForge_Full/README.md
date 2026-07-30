@@ -1,5 +1,9 @@
-# GrowlForge 2.0.0
+# GrowlForge 2.0.1
 
+
+## Build fix in 2.0.1
+
+Fixed MSVC overload ambiguity in GDI+ rectangle drawing calls by using explicit `Gdiplus::RectF` overloads. Audio DSP and parameter behavior are unchanged.
 
 ## GrowlForge 2.0 custom interface
 

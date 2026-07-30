@@ -194,7 +194,7 @@ void drawKnob(Graphics&g,GuiState*ui,const KnobDef&k){
   const int seg=10;const float gap=2.0f;const float sw=(w-gap*(seg-1))/seg;
   for(int i=0;i<seg;++i){
    const bool on=(float)(i+1)/seg<=v+0.001f;
-   SolidBrush b(on?accent:Color(255,42,47,50));g.FillRectangle(&b,x+i*(sw+gap),y,sw,h);
+   SolidBrush b(on?accent:Color(255,42,47,50));g.FillRectangle(&b,RectF(x+i*(sw+gap),y,sw,h));
   }
  }
 }
@@ -221,9 +221,9 @@ void drawSaturationMeter(Graphics&g,GuiState*ui){
    if(t<0.72f)c=Color(255,225,100+(BYTE)(55*t),22);
    else c=Color(255,255,178+(BYTE)(50*(t-0.72f)/0.28f),40);
   }
-  SolidBrush b(c);g.FillRectangle(&b,x+i*(sw+gap),y,sw,13);
+  SolidBrush b(c);g.FillRectangle(&b,RectF(x+i*(sw+gap),y,sw,13.0f));
  }
- Pen border(Color(255,57,59,61),1.0f);g.DrawRectangle(&border,x-3,y-3,w+6,19);
+ Pen border(Color(255,57,59,61),1.0f);g.DrawRectangle(&border,RectF(x-3.0f,y-3.0f,w+6.0f,19.0f));
 }
 
 float meterNormalized(float peak){
@@ -241,7 +241,7 @@ void drawStereoMeter(Graphics&g,GuiState*ui,float x,float y,float w,bool output)
   for(int i=0;i<seg;++i){
    const float t=(float)(i+1)/seg;
    Color active=t<0.72f?Color(255,75,215,54):(t<0.9f?Color(255,248,177,33):Color(255,241,61,28));
-   SolidBrush b(t<=n?active:Color(255,35,39,41));g.FillRectangle(&b,x+i*(sw+gap),y+chn*17,sw,h);
+   SolidBrush b(t<=n?active:Color(255,35,39,41));g.FillRectangle(&b,RectF(x+i*(sw+gap),y+chn*17.0f,sw,h));
   }
  }
  const wchar_t* marks[]={L"-60",L"-48",L"-36",L"-24",L"-12",L"-6",L"0"};
@@ -252,7 +252,7 @@ void drawStereoMeter(Graphics&g,GuiState*ui,float x,float y,float w,bool output)
 void drawUi(Graphics&g,GuiState*ui){
  g.SetSmoothingMode(SmoothingModeAntiAlias);
  g.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
- SolidBrush bg(colorBg());g.FillRectangle(&bg,0,0,kDesignWidth,kDesignHeight);
+ SolidBrush bg(colorBg());g.FillRectangle(&bg,RectF(0.0f,0.0f,kDesignWidth,kDesignHeight));
 
  fillRounded(g,RectF(8,8,1184,72),9,colorPanel2(),colorLine());
  drawText(g,L"GROWLFORGE",RectF(30,19,280,42),31.0f,colorText(),FontStyleBold,StringAlignmentNear);
