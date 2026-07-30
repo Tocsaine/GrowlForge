@@ -269,7 +269,17 @@ struct GrowlForge{
    // Moderate level normalization keeps the increased Drive power audible. It
    // prevents a large loudness jump without cancelling the new mid-range gain.
    const double normalization=std::sqrt(1+0.23*(pre-1)*amount);
-   double y=(main*(1-fm)+intelligent*fm)/normalization;
+
+   // x2 pushes more signal into the harder clipping path. Once that path is
+   // saturated its peak level stops growing, while the normalization above
+   // continues to increase with Drive. Compensate only that predictable x2
+   // energy loss so raising Drive no longer produces a loudness dip. The
+   // correction is smooth, bounded and exactly neutral when Drive is zero or
+   // x2 is disabled; it does not alter the clipping character itself.
+   const double x2DriveMakeup=x2Enabled()
+      ?clamp(1.0+0.15*amount*(driveShape+hardCurve),1.0,1.27)
+      :1.0;
+   double y=(main*(1-fm)+intelligent*fm)*x2DriveMakeup/normalization;
 
    float filtered=(float)y;for(auto&f:c.antiAlias)filtered=f.lp(filtered);out=filtered;
   }
@@ -608,7 +618,7 @@ void plugMain(const clap_plugin_t*){}
 
 const char*features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
 const clap_plugin_descriptor_t desc{
- CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.4.2",
+ CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","1.4.3",
  "Post-amp guitar enhancer with resonance, compression, harmonic control and live activity indicators.",features
 };
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}
