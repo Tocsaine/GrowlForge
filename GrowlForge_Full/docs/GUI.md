@@ -50,3 +50,11 @@ is 900 × 540.
 The custom GUI is implemented for the CLAP Win32 window API. The portable non-Windows
 build still compiles and exposes the same DSP and parameter interface, but reports the
 custom GUI API as unsupported.
+
+## Renderer architecture in 2.0.2
+
+The Win32 renderer keeps a persistent backbuffer and a cached static layer. Panels,
+labels, inactive meter segments, and knob bodies are rendered only when the editor is
+created or resized. Mouse interaction invalidates only the affected control and the top
+value display. The 30 Hz animation timer redraws only the live meter and activity regions
+and is stopped while the editor is hidden.

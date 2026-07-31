@@ -1,4 +1,15 @@
-# GrowlForge 2.0.1
+# GrowlForge 2.0.2
+
+## GUI performance and layout fix in 2.0.2
+
+- Replaced per-frame backbuffer allocation with persistent static and dynamic surfaces.
+- Split the interface into a cached static layer and small dynamic repaint regions.
+- Cached knob bodies, fonts, string formats, and reusable GDI+ drawing objects.
+- The 30 Hz timer now redraws only live meters and activity indicators.
+- Mouse movement invalidates only the affected control and parameter display.
+- GUI animation stops while the editor is hidden.
+- Fixed clipping and edge alignment of the bottom dB scale labels.
+- Audio DSP, parameter IDs, state format, and v1.4.4 sound are unchanged.
 
 
 ## Build fix in 2.0.1

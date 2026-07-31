@@ -8,6 +8,10 @@
 #include <cstring>
 #include <cstdint>
 #include <string>
+#include <memory>
+#include <unordered_map>
+#include <vector>
+#include <limits>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -728,7 +732,7 @@ void plugMain(const clap_plugin_t*){}
 
 const char*features[]={CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,CLAP_PLUGIN_FEATURE_DISTORTION,CLAP_PLUGIN_FEATURE_STEREO,nullptr};
 const clap_plugin_descriptor_t desc{
- CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","2.0.1",
+ CLAP_VERSION,"audio.growlforge.effect","GrowlForge","OpenAI / User Project","","","","2.0.2",
  "Post-amp guitar character processor with a scalable custom interface, live meters and tactile distortion shaping.",features
 };
 uint32_t factoryCount(const clap_plugin_factory_t*){return 1;}
