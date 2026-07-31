@@ -1,4 +1,13 @@
-# GrowlForge 2.0.2
+# GrowlForge 2.0.3
+
+
+## Drive subsonic/DC fix in 2.0.3
+
+- Removed the non-zero zero-input response from the asymmetric Drive transfer.
+- Added a Drive-only 20 Hz second-order Butterworth high-pass after saturation.
+- Eliminates the large DC / approximately 10 Hz energy visible in analyzers.
+- The filter is inactive and reset at `Drive = 0`; other controls are unchanged.
+- GUI performance and layout improvements from 2.0.2 are retained.
 
 ## GUI performance and layout fix in 2.0.2
 

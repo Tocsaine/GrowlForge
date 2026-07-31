@@ -1,0 +1,21 @@
+GrowlForge 2.0.3 verification
+================================
+
+Build
+- Portable CMake/Ninja Release build: PASS
+
+Drive silence output
+- Sample rates tested: 44.1, 48, 96 and 192 kHz
+- Drive values tested: 0.1, 1.0, 5.0 and 10.0
+- Worst absolute output for a zero input: 0.0
+
+48 kHz signal checks at Drive 10
+- Zero input: mean 0.0, RMS 0.0, maximum 0.0
+- 10 Hz sine: mean approximately 2.9e-11
+- 82 Hz sine: mean approximately 6e-12
+- 440 Hz sine: mean approximately 1.1e-10
+
+Compatibility
+- With Drive at 0, a two-second render using Growl, Grind, Fuzz, Mass,
+  Bite, Bloom, Sag, Dynamics, Texture, Attack and Compression was byte-for-byte
+  identical to GrowlForge 2.0.2.
