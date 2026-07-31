@@ -12,9 +12,8 @@
 namespace growlforge {
 
 GrowlForge::GrowlForge(const clap_host_t* hostIn)
-    : host(hostIn), parameters(hostIn), dsp(parameters) {
-    for (auto& value : guiInputPeak) value = 0.0f;
-    for (auto& value : guiOutputPeak) value = 0.0f;
+    : host(hostIn), parameters(hostIn), dsp(parameters), presets(parameters) {
+    meters.reset();
 }
 
 GrowlForge* self(const clap_plugin_t* plugin) {
@@ -27,41 +26,27 @@ void handleEvents(GrowlForge* instance, const clap_input_events_t* events) {
     if (!events || !events->size || !events->get) return;
     bool changed = false;
     for (uint32_t i = 0; i < events->size(events); ++i) {
-        auto* header = events->get(events, i);
-        if (!header || header->space_id != CLAP_CORE_EVENT_SPACE_ID || header->type != CLAP_EVENT_PARAM_VALUE) continue;
-        auto* valueEvent = reinterpret_cast<const clap_event_param_value_t*>(header);
-        if (valueEvent->param_id >= kParamCount || valueEvent->param_id == AutoGainCorrection || valueEvent->param_id >= MeterSaturation) continue;
+        const auto* header = events->get(events, i);
+        if (!header || header->space_id != CLAP_CORE_EVENT_SPACE_ID ||
+            header->type != CLAP_EVENT_PARAM_VALUE) continue;
+        const auto* valueEvent = reinterpret_cast<const clap_event_param_value_t*>(header);
+        const clap_id id = valueEvent->param_id;
+        if (id >= kParamCount || isReadOnlyParameter(id)) continue;
 
-        double value = clamp(valueEvent->value, defs[valueEvent->param_id].min, defs[valueEvent->param_id].max);
-        if (valueEvent->param_id == AutoGain || valueEvent->param_id == ApplyAutoGain || valueEvent->param_id == X2) {
-            value = value >= 0.5 ? 1.0 : 0.0;
-        } else {
-            value = quantize01(value);
-        }
+        double value = clamp(valueEvent->value, defs[id].min, defs[id].max);
+        value = isToggleParameter(id) ? (value >= 0.5 ? 1.0 : 0.0) : quantize01(value);
 
-        if (valueEvent->param_id == ApplyAutoGain && value >= 0.5) {
+        if (id == ApplyAutoGain && value >= 0.5) {
             instance->dsp.applyCurrentAutoGain();
+            instance->presets.markDirty();
             changed = true;
             continue;
         }
 
-        if (valueEvent->param_id == AutoGain) {
-            const double previous = instance->parameters.values[AutoGain].load();
-            instance->parameters.values[AutoGain] = value;
-
-            if (previous != value) {
-                // Auto-Gain must measure from a neutral output reference.
-                // Enabling it clears any previously committed/manual Output gain.
-                if (value >= 0.5) instance->parameters.values[Output] = 0.0;
-                instance->dsp.resetAutoGainMeasurement();
-            }
-
-            changed = true;
-            continue;
-        }
-
-        instance->parameters.values[valueEvent->param_id] = value;
-        changed = true;
+        const double previous = instance->parameters.values[id].exchange(value);
+        if (id == AutoGain && previous != value && value >= 0.5) instance->dsp.resetAutoGainMeasurement();
+        if (isPresetParameter(id) && previous != value) instance->presets.markDirty();
+        changed = changed || previous != value;
     }
     if (changed) instance->dsp.configure();
 }
@@ -101,6 +86,7 @@ void applyDeferredGuiActions(GrowlForge* instance) {
     if (parameters.autoGainResetPending.exchange(false)) instance->dsp.resetAutoGainMeasurement();
     if (parameters.applyAutoGainPending.exchange(false)) {
         instance->dsp.applyCurrentAutoGain();
+        instance->presets.markDirty();
         parameters.guiPendingValue[Output] = parameters.values[Output].load();
         parameters.guiPendingValue[AutoGain] = parameters.values[AutoGain].load();
         parameters.guiPendingFlags[Output].fetch_or(2u, std::memory_order_release);
@@ -147,17 +133,22 @@ void plugDestroy(const clap_plugin_t* plugin) {
 
 bool plugActivate(const clap_plugin_t* plugin, double sampleRate, uint32_t, uint32_t) {
     auto* instance = self(plugin);
-    if (sampleRate <= 1000) return false;
+    if (sampleRate <= 1000.0) return false;
     instance->dsp.setSampleRate(sampleRate);
     instance->dsp.reset();
     instance->dsp.configure();
+    instance->meters.reset();
     return true;
 }
 
 void plugDeactivate(const clap_plugin_t*) {}
 bool plugStart(const clap_plugin_t*) { return true; }
 void plugStop(const clap_plugin_t*) {}
-void plugReset(const clap_plugin_t* plugin) { self(plugin)->dsp.reset(); }
+void plugReset(const clap_plugin_t* plugin) {
+    auto* instance = self(plugin);
+    instance->dsp.reset();
+    instance->meters.reset();
+}
 
 clap_process_status plugProcess(const clap_plugin_t* plugin, const clap_process_t* process) {
     if (!process) return CLAP_PROCESS_ERROR;
@@ -165,28 +156,80 @@ clap_process_status plugProcess(const clap_plugin_t* plugin, const clap_process_
     handleEvents(instance, process->in_events);
     flushGuiEvents(instance, process->out_events);
     if (process->audio_inputs_count < 1 || process->audio_outputs_count < 1) return CLAP_PROCESS_CONTINUE;
+
     auto& input = process->audio_inputs[0];
     auto& output = process->audio_outputs[0];
-    const uint32_t channels = std::min({input.channel_count, output.channel_count, 2u});
-    const float decay = static_cast<float>(std::exp(
-        -static_cast<double>(process->frames_count) / std::max(1.0, 0.34 * instance->dsp.sampleRate())));
-    for (uint32_t channel = 0; channel < channels; ++channel) {
-        if (!input.data32 || !output.data32 || !input.data32[channel] || !output.data32[channel]) continue;
-        float peakIn = 0.0f, peakOut = 0.0f;
-        for (uint32_t frame = 0; frame < process->frames_count; ++frame) {
-            const float inputSample = input.data32[channel][frame];
-            const float outputSample = instance->dsp.processSample(inputSample, static_cast<int>(channel));
-            output.data32[channel][frame] = outputSample;
-            peakIn = std::max(peakIn, std::abs(inputSample));
-            peakOut = std::max(peakOut, std::abs(outputSample));
+    const uint32_t channelCount = std::min({input.channel_count, output.channel_count, 2u});
+    if (channelCount == 0 || process->frames_count == 0) return CLAP_PROCESS_CONTINUE;
+
+    float inputPeak[2]{0.0f, 0.0f};
+    float outputPeak[2]{0.0f, 0.0f};
+    double inputSum2[2]{0.0, 0.0};
+    double outputSum2[2]{0.0, 0.0};
+    float wetPreCeilingPeak = 0.0f;
+    float gateReduction = 0.0f;
+    bool internalClip = false;
+
+    const bool useFloat = input.data32 && output.data32;
+    const bool useDouble = !useFloat && input.data64 && output.data64;
+    if (!useFloat && !useDouble) return CLAP_PROCESS_ERROR;
+
+    for (uint32_t frame = 0; frame < process->frames_count; ++frame) {
+        const float left = useFloat
+            ? input.data32[0][frame]
+            : static_cast<float>(input.data64[0][frame]);
+        const float right = channelCount > 1
+            ? (useFloat ? input.data32[1][frame] : static_cast<float>(input.data64[1][frame]))
+            : left;
+
+        const FrameResult result = instance->dsp.processFrame(left, right, channelCount);
+        if (useFloat) {
+            output.data32[0][frame] = result.left;
+            if (channelCount > 1) output.data32[1][frame] = result.right;
+        } else {
+            output.data64[0][frame] = result.left;
+            if (channelCount > 1) output.data64[1][frame] = result.right;
         }
-        instance->guiInputPeak[channel] = std::max(peakIn, instance->guiInputPeak[channel].load() * decay);
-        instance->guiOutputPeak[channel] = std::max(peakOut, instance->guiOutputPeak[channel].load() * decay);
+
+        const float in[2]{left, right};
+        const float out[2]{result.left, result.right};
+        for (uint32_t channel = 0; channel < channelCount; ++channel) {
+            inputPeak[channel] = std::max(inputPeak[channel], std::abs(in[channel]));
+            outputPeak[channel] = std::max(outputPeak[channel], std::abs(out[channel]));
+            inputSum2[channel] += static_cast<double>(in[channel]) * in[channel];
+            outputSum2[channel] += static_cast<double>(out[channel]) * out[channel];
+        }
+        wetPreCeilingPeak = std::max({wetPreCeilingPeak,
+                                      std::abs(result.wetPreCeilingLeft),
+                                      std::abs(result.wetPreCeilingRight)});
+        gateReduction = std::max(gateReduction, result.gateReductionPercent);
+        internalClip = internalClip || wetPreCeilingPeak > 1.0f;
     }
-    for (uint32_t channel = channels; channel < 2; ++channel) {
-        instance->guiInputPeak[channel] = instance->guiInputPeak[channel].load() * decay;
-        instance->guiOutputPeak[channel] = instance->guiOutputPeak[channel].load() * decay;
+
+    // Any output channels beyond stereo are passed through untouched.
+    for (uint32_t channel = 2; channel < std::min(input.channel_count, output.channel_count); ++channel) {
+        if (useFloat && input.data32[channel] && output.data32[channel])
+            std::copy_n(input.data32[channel], process->frames_count, output.data32[channel]);
+        else if (useDouble && input.data64[channel] && output.data64[channel])
+            std::copy_n(input.data64[channel], process->frames_count, output.data64[channel]);
     }
+
+    for (uint32_t channel = 0; channel < 2; ++channel) {
+        if (channel < channelCount) {
+            instance->meters.inputPeak[channel] = inputPeak[channel];
+            instance->meters.outputPeak[channel] = outputPeak[channel];
+            instance->meters.inputRms[channel] = static_cast<float>(std::sqrt(inputSum2[channel] / process->frames_count));
+            instance->meters.outputRms[channel] = static_cast<float>(std::sqrt(outputSum2[channel] / process->frames_count));
+        } else {
+            instance->meters.inputPeak[channel] = 0.0f;
+            instance->meters.outputPeak[channel] = 0.0f;
+            instance->meters.inputRms[channel] = 0.0f;
+            instance->meters.outputRms[channel] = 0.0f;
+        }
+    }
+    instance->meters.wetPreCeilingPeak = wetPreCeilingPeak;
+    instance->meters.gateReduction = gateReduction;
+    instance->meters.internalClip = internalClip;
     instance->parameters.values[AutoGainCorrection] = instance->dsp.currentAutoGainDb();
     return CLAP_PROCESS_CONTINUE;
 }
@@ -233,17 +276,21 @@ bool paramValue(const clap_plugin_t* plugin, clap_id id, double* value) {
 
 bool valueText(const clap_plugin_t*, clap_id id, double value, char* display, uint32_t size) {
     if (id >= kParamCount || !display || !size) return false;
-    if (id == AutoGain || id == X2) std::snprintf(display, size, "%s", value >= 0.5 ? "On" : "Off");
-    else if (id == ApplyAutoGain) std::snprintf(display, size, "%s", value >= 0.5 ? "Apply" : "Ready");
-    else std::snprintf(display, size, "%.1f%s", value, defs[id].unit);
+    if (id == AutoGain || id == X2 || id == Bypass)
+        std::snprintf(display, size, "%s", value >= 0.5 ? "On" : "Off");
+    else if (id == ApplyAutoGain)
+        std::snprintf(display, size, "%s", value >= 0.5 ? "Apply" : "Ready");
+    else
+        std::snprintf(display, size, "%.1f%s", value, defs[id].unit);
     return true;
 }
 
 bool textValue(const clap_plugin_t*, clap_id id, const char* text, double* value) {
-    if (id >= kParamCount || !text || !value || id == AutoGainCorrection) return false;
-    if (id == AutoGain || id == ApplyAutoGain || id == X2) {
-        *value = (!std::strcmp(text, "On") || !std::strcmp(text, "on") || !std::strcmp(text, "Apply") ||
-                  !std::strcmp(text, "apply") || !std::strcmp(text, "1")) ? 1.0 : 0.0;
+    if (id >= kParamCount || !text || !value || isReadOnlyParameter(id)) return false;
+    if (isToggleParameter(id)) {
+        *value = (!std::strcmp(text, "On") || !std::strcmp(text, "on") ||
+                  !std::strcmp(text, "Apply") || !std::strcmp(text, "apply") ||
+                  !std::strcmp(text, "1")) ? 1.0 : 0.0;
         return true;
     }
     char* end = nullptr;
@@ -284,8 +331,8 @@ const clap_plugin_descriptor_t descriptor{
     "GrowlForge",
     "OpenAI / User Project",
     "", "", "",
-    "2.1.0-dev",
-    "Post-amp guitar character processor with a scalable custom interface, live meters and tactile distortion shaping.",
+    "2.1.0",
+    "Post-amp guitar character processor with Auto-Gain 2.0, click-free bypass, linked gate, enhanced metering and presets.",
     features
 };
 

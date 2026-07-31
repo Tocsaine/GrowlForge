@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstring>
 #include <cwchar>
+#include <filesystem>
+#include <string>
 #include <limits>
 #include <memory>
 #include <unordered_map>
@@ -20,6 +22,8 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <gdiplus.h>
+#include <commdlg.h>
+#include <shellapi.h>
 #endif
 
 namespace growlforge {
@@ -40,6 +44,12 @@ constexpr uint32_t kMaxHeight = 1200;
 constexpr UINT_PTR kAnimationTimer = 1;
 constexpr UINT kAnimationIntervalMs = 33;
 constexpr wchar_t kWindowClass[] = L"GrowlForge2PluginWindow";
+constexpr clap_id kGateActivity = 0xFFFFFFE0u;
+constexpr clap_id kPresetPrevious = 0xFFFFFFE1u;
+constexpr clap_id kPresetNext = 0xFFFFFFE2u;
+constexpr clap_id kPresetLoad = 0xFFFFFFE3u;
+constexpr clap_id kPresetSave = 0xFFFFFFE4u;
+constexpr clap_id kPresetMenu = 0xFFFFFFE5u;
 
 struct KnobDef {
  clap_id id;
@@ -53,7 +63,7 @@ constexpr clap_id kNoActivity = CLAP_INVALID_ID;
 
 static const KnobDef kKnobs[] = {
  {Input,L"Input",70,178,31,false,kNoActivity},
- {Gate,L"Gate",175,178,31,false,kNoActivity},
+ {Gate,L"Gate",175,178,31,false,kGateActivity},
  {Tight,L"Tight",280,178,31,false,kNoActivity},
  {Punch,L"Punch",70,329,31,false,kNoActivity},
  {Body,L"Body",175,329,31,false,kNoActivity},
@@ -129,8 +139,18 @@ struct GuiState {
  std::unique_ptr<Pen> scratchPen;
 
  std::array<double,kParamCount> lastParamValues{};
+ std::array<float,2> visualInputPeak{};
+ std::array<float,2> visualInputRms{};
+ std::array<float,2> visualOutputPeak{};
+ std::array<float,2> visualOutputRms{};
+ std::array<float,2> inputPeakHold{};
+ std::array<float,2> outputPeakHold{};
+ std::array<int,2> inputHoldFrames{};
+ std::array<int,2> outputHoldFrames{};
+ int clipHoldFrames = 0;
  clap_id lastDisplayId = CLAP_INVALID_ID;
  double lastDisplayValue = std::numeric_limits<double>::quiet_NaN();
+ std::string lastPresetName;
 
  GuiState(){
   lastParamValues.fill(std::numeric_limits<double>::quiet_NaN());
@@ -269,17 +289,33 @@ const wchar_t* labelFor(clap_id id){
  for(const auto&k:kKnobs)if(k.id==id)return k.label;
  if(id==AutoGain)return L"Auto-Gain";
  if(id==X2)return L"×2 Color";
+ if(id==Bypass)return L"Bypass";
  if(id==ApplyAutoGain)return L"Commit Auto-Gain";
+ if(id==kPresetPrevious)return L"Previous Preset";
+ if(id==kPresetNext)return L"Next Preset";
+ if(id==kPresetLoad)return L"Load Preset";
+ if(id==kPresetSave)return L"Save Preset";
+ if(id==kPresetMenu)return L"Preset Browser";
  return L"Drive";
 }
 
 void formatParam(GrowlForge*s,clap_id id,wchar_t*out,size_t n){
  if(!out||n==0)return;
- const double value=(id<kParamCount)?s->parameters.values[id].load():0.0;
- if(id==AutoGain||id==X2){std::swprintf(out,n,L"%ls",value>=0.5?L"ON":L"OFF");return;}
+ if(id>=kParamCount){std::swprintf(out,n,L"PRESET");return;}
+ const double value=s->parameters.values[id].load();
+ if(id==AutoGain||id==X2||id==Bypass){std::swprintf(out,n,L"%ls",value>=0.5?L"ON":L"OFF");return;}
  if(id==Input||id==Output||id==Ceiling||id==AutoGainCorrection){std::swprintf(out,n,L"%.1f dB",value);return;}
  if(id==ParallelDry){std::swprintf(out,n,L"%.1f %%",value);return;}
  std::swprintf(out,n,L"%.1f",value);
+}
+
+std::wstring widenUtf8(const std::string& text){
+ if(text.empty())return {};
+ const int needed=MultiByteToWideChar(CP_UTF8,0,text.c_str(),(int)text.size(),nullptr,0);
+ if(needed<=0)return std::wstring(text.begin(),text.end());
+ std::wstring result((size_t)needed,L'\0');
+ MultiByteToWideChar(CP_UTF8,0,text.c_str(),(int)text.size(),result.data(),needed);
+ return result;
 }
 
 const KnobBodyCache* getKnobBody(GuiState* ui,float radius,bool orange,float renderScale){
@@ -372,7 +408,9 @@ void drawKnobDynamic(Graphics&g,GuiState*ui,const KnobDef&k){
 void drawKnobActivityDynamic(Graphics&g,GuiState*ui,const KnobDef&k){
  if(k.activity==kNoActivity)return;
  const Color accent=k.orange?colorOrange():colorTeal();
- const float v=(float)clamp(ui->owner->parameters.values[k.activity].load()/100.0,0.0,1.0);
+ float v=0.0f;
+ if(k.activity==kGateActivity)v=(float)clamp(ui->owner->meters.gateReduction.load()/100.0f,0.0f,1.0f);
+ else v=(float)clamp(ui->owner->parameters.values[k.activity].load()/100.0,0.0,1.0);
  const float w=54.0f,h=5.0f,x=k.x-w*0.5f,y=k.y+k.radius+34.0f;
  const int seg=10;const float gap=2.0f;const float sw=(w-gap*(seg-1))/seg;
  for(int i=0;i<seg;++i){
@@ -439,14 +477,26 @@ void drawStereoMeterStatic(Graphics&g,GuiState*ui,float x,float y,float w,bool o
 void drawStereoMeterDynamic(Graphics&g,GuiState*ui,float x,float y,float w,bool output){
  const int seg=48;const float gap=2.0f;const float sw=(w-gap*(seg-1))/seg;const float h=8.0f;
  for(int chn=0;chn<2;++chn){
-  const float peak=output?ui->owner->guiOutputPeak[chn].load():ui->owner->guiInputPeak[chn].load();
-  const float n=meterNormalized(peak);
+  const float peak=output?ui->visualOutputPeak[chn]:ui->visualInputPeak[chn];
+  const float rms=output?ui->visualOutputRms[chn]:ui->visualInputRms[chn];
+  const float hold=output?ui->outputPeakHold[chn]:ui->inputPeakHold[chn];
+  const float peakN=meterNormalized(peak),rmsN=meterNormalized(rms),holdN=meterNormalized(hold);
   for(int i=0;i<seg;++i){
    const float t=(float)(i+1)/seg;
-   if(t>n)break;
-   const Color active=t<0.72f?Color(255,75,215,54):(t<0.9f?Color(255,248,177,33):Color(255,241,61,28));
-   g.FillRectangle(setBrush(ui,active),RectF(x+i*(sw+gap),y+chn*17.0f,sw,h));
+   if(t<=rmsN){
+    const Color active=t<0.72f?Color(255,44,142,44):(t<0.9f?Color(255,142,102,27):Color(255,150,40,24));
+    g.FillRectangle(setBrush(ui,active),RectF(x+i*(sw+gap),y+chn*17.0f,sw,h));
+   }
+   if(t<=peakN){
+    const Color active=t<0.72f?Color(255,75,215,54):(t<0.9f?Color(255,248,177,33):Color(255,241,61,28));
+    g.FillRectangle(setBrush(ui,active),RectF(x+i*(sw+gap),y+chn*17.0f,sw,2.0f));
+   }
   }
+  const float hx=x+clamp(holdN,0.0f,1.0f)*w;
+  g.DrawLine(setPen(ui,Color(255,245,245,240),1.0f),hx,y+chn*17.0f-1.0f,hx,y+chn*17.0f+h+1.0f);
+ }
+ if(output&&ui->clipHoldFrames>0){
+  drawText(g,ui,L"INTERNAL CLIP",RectF(x+w-110.0f,y-25.0f,110.0f,20.0f),10.5f,Color(255,241,61,28),FontStyleBold,StringAlignmentFar);
  }
 }
 
@@ -458,8 +508,8 @@ void drawStaticUi(Graphics&g,GuiState*ui,float renderScale){
 
  fillRounded(g,ui,RectF(8.0f,8.0f,1184.0f,72.0f),9.0f,colorPanel2(),colorLine());
  drawText(g,ui,L"GROWLFORGE",RectF(30.0f,19.0f,280.0f,42.0f),31.0f,colorText(),FontStyleBold,StringAlignmentNear);
- drawText(g,ui,L"2.0",RectF(278.0f,26.0f,70.0f,26.0f),17.0f,colorOrange(),FontStyleBold,StringAlignmentNear);
- fillRounded(g,ui,RectF(430.0f,15.0f,340.0f,57.0f),7.0f,Color(255,8,10,12),Color(255,56,59,62));
+ drawText(g,ui,L"2.1",RectF(278.0f,26.0f,70.0f,26.0f),17.0f,colorOrange(),FontStyleBold,StringAlignmentNear);
+ fillRounded(g,ui,RectF(390.0f,15.0f,380.0f,57.0f),7.0f,Color(255,8,10,12),Color(255,56,59,62));
 
  drawSection(g,ui,RectF(10.0f,90.0f,330.0f,360.0f),L"INPUT & FEEL",false);
  drawSection(g,ui,RectF(348.0f,90.0f,504.0f,360.0f),L"DISTORTION CORE",true);
@@ -476,11 +526,12 @@ void drawStaticUi(Graphics&g,GuiState*ui,float renderScale){
  fillRounded(g,ui,RectF(10.0f,634.0f,1180.0f,78.0f),7.0f,colorPanel2(),colorLine());
  drawStereoMeterStatic(g,ui,52.0f,665.0f,420.0f,false);
  drawStereoMeterStatic(g,ui,728.0f,665.0f,420.0f,true);
- drawText(g,ui,L"GROWLFORGE 2.0  •  CLAP",RectF(485.0f,653.0f,230.0f,26.0f),10.5f,Color(255,71,76,80),FontStyleBold);
+ drawText(g,ui,L"GROWLFORGE 2.1  •  CLAP",RectF(485.0f,653.0f,230.0f,26.0f),10.5f,Color(255,71,76,80),FontStyleBold);
 }
 
 clap_id activeDisplayId(const GuiState*ui){
- return ui->drag!=CLAP_INVALID_ID?ui->drag:(ui->hover!=CLAP_INVALID_ID?ui->hover:Drive);
+ const clap_id candidate=ui->drag!=CLAP_INVALID_ID?ui->drag:(ui->hover!=CLAP_INVALID_ID?ui->hover:Drive);
+ return candidate<kParamCount?candidate:Drive;
 }
 
 RectF knobCircleRect(const KnobDef&k);
@@ -496,20 +547,35 @@ void drawDynamicUi(Graphics&g,GuiState*ui,const RectF&dirty){
  g.SetPixelOffsetMode(PixelOffsetModeHighQuality);
  g.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
 
- const RectF displayRect(428.0f,13.0f,344.0f,61.0f);
+ const RectF displayRect(388.0f,13.0f,384.0f,61.0f);
  if(rectIntersects(dirty,displayRect)){
   const clap_id active=activeDisplayId(ui);
   wchar_t value[64]{};formatParam(ui->owner,active,value,64);
-  drawText(g,ui,labelFor(active),RectF(445.0f,19.0f,310.0f,20.0f),12.5f,active==Drive?colorOrange():colorTeal(),FontStyleBold);
-  drawText(g,ui,value,RectF(445.0f,35.0f,310.0f,32.0f),24.0f,colorText(),FontStyleBold);
+  const std::wstring preset=widenUtf8(ui->owner->presets.currentName());
+  drawText(g,ui,preset.c_str(),RectF(405.0f,16.0f,350.0f,15.0f),10.5f,colorMuted(),FontStyleBold);
+  drawText(g,ui,labelFor(active),RectF(405.0f,29.0f,350.0f,15.0f),10.5f,active==Drive?colorOrange():colorTeal(),FontStyleBold);
+  drawText(g,ui,value,RectF(405.0f,41.0f,350.0f,27.0f),20.0f,colorText(),FontStyleBold);
+  if(ui->owner->parameters.values[Bypass].load()>=0.5)
+   drawText(g,ui,L"BYPASSED",RectF(652.0f,16.0f,100.0f,15.0f),9.5f,colorOrange(),FontStyleBold,StringAlignmentFar);
  }
 
+ const RectF previousRect(350.0f,24.0f,32.0f,39.0f);
+ const RectF nextRect(778.0f,24.0f,32.0f,39.0f);
+ const RectF loadRect(816.0f,24.0f,54.0f,39.0f);
+ const RectF saveRect(876.0f,24.0f,54.0f,39.0f);
+ const RectF bypassRect(936.0f,24.0f,88.0f,39.0f);
  const RectF x2r(1032.0f,22.0f,142.0f,43.0f);
- if(rectIntersects(dirty,x2r)){
-  const bool x2=ui->owner->parameters.values[X2].load()>=0.5;
-  fillRounded(g,ui,x2r,7.0f,x2?Color(255,65,38,15):Color(255,24,27,29),(ui->hover==X2||x2)?colorOrange():colorLine());
-  drawText(g,ui,L"×2 COLOR",x2r,16.0f,x2?colorOrange():colorText(),FontStyleBold);
- }
+ auto drawHeaderButton=[&](const RectF&r,const wchar_t*label,clap_id id,bool active,bool orange){
+  const Color accent=orange?colorOrange():colorTeal();
+  fillRounded(g,ui,r,6.0f,active?Color(255,58,38,19):Color(255,24,27,29),(ui->hover==id||active)?accent:colorLine());
+  drawText(g,ui,label,r,12.0f,active?accent:colorText(),FontStyleBold);
+ };
+ if(rectIntersects(dirty,previousRect))drawHeaderButton(previousRect,L"◀",kPresetPrevious,false,false);
+ if(rectIntersects(dirty,nextRect))drawHeaderButton(nextRect,L"▶",kPresetNext,false,false);
+ if(rectIntersects(dirty,loadRect))drawHeaderButton(loadRect,L"LOAD",kPresetLoad,false,false);
+ if(rectIntersects(dirty,saveRect))drawHeaderButton(saveRect,L"SAVE",kPresetSave,false,false);
+ if(rectIntersects(dirty,bypassRect))drawHeaderButton(bypassRect,L"BYPASS",Bypass,ui->owner->parameters.values[Bypass].load()>=0.5,true);
+ if(rectIntersects(dirty,x2r))drawHeaderButton(x2r,L"×2 COLOR",X2,ui->owner->parameters.values[X2].load()>=0.5,true);
 
  for(const auto&k:kKnobs){
   if(rectIntersects(dirty,knobCircleRect(k)))drawKnobDynamic(g,ui,k);
@@ -585,7 +651,7 @@ RectF knobDynamicRect(const KnobDef&k){
 
 const KnobDef* findKnob(clap_id id){for(const auto&k:kKnobs)if(k.id==id)return &k;return nullptr;}
 
-void invalidateDisplay(GuiState*ui){invalidateLogical(ui,RectF(428.0f,13.0f,344.0f,61.0f),1.0f);}
+void invalidateDisplay(GuiState*ui){invalidateLogical(ui,RectF(388.0f,13.0f,384.0f,61.0f),1.0f);}
 void paintLogicalNow(GuiState*ui,const RectF&r,float padding=1.0f){
  invalidateLogical(ui,r,padding);
  if(ui&&ui->hwnd)UpdateWindow(ui->hwnd);
@@ -594,6 +660,8 @@ void paintLogicalNow(GuiState*ui,const RectF&r,float padding=1.0f){
 void invalidateControl(GuiState*ui,clap_id id){
  if(const auto*k=findKnob(id)){invalidateLogical(ui,knobDynamicRect(*k),2.0f);return;}
  if(id==X2){invalidateLogical(ui,RectF(1029.0f,19.0f,148.0f,49.0f),2.0f);return;}
+ if(id==Bypass){invalidateLogical(ui,RectF(933.0f,21.0f,94.0f,45.0f),2.0f);invalidateDisplay(ui);return;}
+ if(id==kPresetPrevious||id==kPresetNext||id==kPresetLoad||id==kPresetSave||id==kPresetMenu){invalidateLogical(ui,RectF(346.0f,20.0f,588.0f,48.0f),2.0f);invalidateDisplay(ui);return;}
  if(id==AutoGain){invalidateLogical(ui,RectF(868.0f,506.0f,108.0f,64.0f),2.0f);invalidateLogical(ui,RectF(870.0f,569.0f,104.0f,31.0f),2.0f);return;}
  if(id==ApplyAutoGain||id==AutoGainCorrection){invalidateLogical(ui,RectF(870.0f,569.0f,104.0f,31.0f),2.0f);return;}
 }
@@ -607,6 +675,12 @@ bool inRect(float x,float y,const RectF&r){return x>=r.X&&x<=r.GetRight()&&y>=r.
 
 clap_id controlAt(float x,float y){
  if(const auto*k=knobAt(x,y))return k->id;
+ if(inRect(x,y,RectF(405.0f,15.0f,350.0f,18.0f)))return kPresetMenu;
+ if(inRect(x,y,RectF(350.0f,24.0f,32.0f,39.0f)))return kPresetPrevious;
+ if(inRect(x,y,RectF(778.0f,24.0f,32.0f,39.0f)))return kPresetNext;
+ if(inRect(x,y,RectF(816.0f,24.0f,54.0f,39.0f)))return kPresetLoad;
+ if(inRect(x,y,RectF(876.0f,24.0f,54.0f,39.0f)))return kPresetSave;
+ if(inRect(x,y,RectF(936.0f,24.0f,88.0f,39.0f)))return Bypass;
  if(inRect(x,y,RectF(1032.0f,22.0f,142.0f,43.0f)))return X2;
  if(inRect(x,y,RectF(881.0f,510.0f,82.0f,38.0f)))return AutoGain;
  if(inRect(x,y,RectF(873.0f,572.0f,98.0f,25.0f)))return ApplyAutoGain;
@@ -625,15 +699,35 @@ void resetSnapshots(GuiState*ui){
  ui->lastParamValues.fill(std::numeric_limits<double>::quiet_NaN());
  ui->lastDisplayId=CLAP_INVALID_ID;
  ui->lastDisplayValue=std::numeric_limits<double>::quiet_NaN();
+ ui->lastPresetName.clear();
 }
 
 void timerTick(GuiState*ui){
  if(!ui||!ui->shown)return;
 
- // Keep the 30 Hz animation paints small and separate so Windows does not
- // coalesce distant meter/activity rectangles into one large repaint.
- paintLogicalNow(ui,RectF(48.0f,660.0f,1104.0f,31.0f),1.0f);
+ for(int channel=0;channel<2;++channel){
+  const float inPeak=ui->owner->meters.inputPeak[channel].load();
+  const float inRms=ui->owner->meters.inputRms[channel].load();
+  const float outPeak=ui->owner->meters.outputPeak[channel].load();
+  const float outRms=ui->owner->meters.outputRms[channel].load();
+  ui->visualInputPeak[channel]=std::max(inPeak,ui->visualInputPeak[channel]*0.82f);
+  ui->visualOutputPeak[channel]=std::max(outPeak,ui->visualOutputPeak[channel]*0.82f);
+  ui->visualInputRms[channel]+= (inRms-ui->visualInputRms[channel])*(inRms>ui->visualInputRms[channel]?0.45f:0.16f);
+  ui->visualOutputRms[channel]+= (outRms-ui->visualOutputRms[channel])*(outRms>ui->visualOutputRms[channel]?0.45f:0.16f);
+  if(inPeak>=ui->inputPeakHold[channel]){ui->inputPeakHold[channel]=inPeak;ui->inputHoldFrames[channel]=30;}
+  else if(ui->inputHoldFrames[channel]>0)--ui->inputHoldFrames[channel];
+  else ui->inputPeakHold[channel]*=0.94f;
+  if(outPeak>=ui->outputPeakHold[channel]){ui->outputPeakHold[channel]=outPeak;ui->outputHoldFrames[channel]=30;}
+  else if(ui->outputHoldFrames[channel]>0)--ui->outputHoldFrames[channel];
+  else ui->outputPeakHold[channel]*=0.94f;
+ }
+ if(ui->owner->meters.internalClip.load())ui->clipHoldFrames=45;
+ else if(ui->clipHoldFrames>0)--ui->clipHoldFrames;
+
+ // Keep the 30 Hz animation paints small and separate.
+ paintLogicalNow(ui,RectF(48.0f,638.0f,1104.0f,55.0f),1.0f);
  paintLogicalNow(ui,RectF(401.0f,414.0f,398.0f,21.0f),1.0f);
+ paintLogicalNow(ui,RectF(140.0f,239.0f,70.0f,15.0f),1.0f);
  paintLogicalNow(ui,RectF(888.0f,239.0f,168.0f,15.0f),1.0f);
  paintLogicalNow(ui,RectF(888.0f,390.0f,168.0f,15.0f),1.0f);
 
@@ -644,12 +738,14 @@ void timerTick(GuiState*ui){
    invalidateControl(ui,k.id);ui->lastParamValues[k.id]=value;parameterPaintPending=true;
   }
  }
- for(const clap_id id:{X2,AutoGain,AutoGainCorrection}){
+ for(const clap_id id:{X2,Bypass,AutoGain,AutoGainCorrection}){
   const double value=ui->owner->parameters.values[id].load();
   if(!std::isfinite(ui->lastParamValues[id])||std::abs(value-ui->lastParamValues[id])>1.0e-7){
    invalidateControl(ui,id);ui->lastParamValues[id]=value;parameterPaintPending=true;
   }
  }
+ const std::string presetName=ui->owner->presets.currentName();
+ if(presetName!=ui->lastPresetName){invalidateDisplay(ui);ui->lastPresetName=presetName;parameterPaintPending=true;}
  const clap_id displayId=activeDisplayId(ui);
  const double displayValue=ui->owner->parameters.values[displayId].load();
  if(displayId!=ui->lastDisplayId||!std::isfinite(ui->lastDisplayValue)||std::abs(displayValue-ui->lastDisplayValue)>1.0e-7){
@@ -681,6 +777,60 @@ void renderStaticLayer(GuiState*ui){
  g.ScaleTransform(sx,sy);
  drawStaticUi(g,ui,std::max(sx,sy));
  ui->staticDirty=false;
+}
+
+
+
+bool showPresetMenu(GuiState*ui){
+ if(!ui||!ui->hwnd)return false;
+ const auto names=ui->owner->presets.presetNames();
+ if(names.empty())return false;
+ HMENU menu=CreatePopupMenu();if(!menu)return false;
+ constexpr UINT kBase=2000;
+ const size_t current=ui->owner->presets.currentIndex();
+ for(size_t i=0;i<names.size();++i){
+  const std::wstring name=widenUtf8(names[i]);
+  AppendMenuW(menu,MF_STRING|(i==current?MF_CHECKED:0),kBase+(UINT)i,name.c_str());
+ }
+ POINT p{405,34};ClientToScreen(ui->hwnd,&p);
+ const UINT command=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_LEFTALIGN|TPM_TOPALIGN|TPM_NONOTIFY,p.x,p.y,0,ui->hwnd,nullptr);
+ DestroyMenu(menu);
+ if(command>=kBase&&command<kBase+names.size()){
+  const bool selected=ui->owner->presets.selectIndex(command-kBase);
+  if(selected){resetSnapshots(ui);invalidateFull(ui);UpdateWindow(ui->hwnd);}return selected;
+ }
+ return false;
+}
+
+bool loadPresetDialog(GuiState*ui){
+ if(!ui||!ui->hwnd)return false;
+ std::error_code error;const auto directory=ui->owner->presets.userPresetDirectory();std::filesystem::create_directories(directory,error);
+ std::wstring initial=directory.wstring();wchar_t file[4096]{};
+ OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=ui->hwnd;
+ dialog.lpstrFilter=L"GrowlForge Presets (*.gfpreset)\0*.gfpreset\0All Files (*.*)\0*.*\0\0";
+ dialog.lpstrFile=file;dialog.nMaxFile=4096;dialog.lpstrInitialDir=initial.c_str();
+ dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+ if(!GetOpenFileNameW(&dialog))return false;
+ const bool loaded=ui->owner->presets.loadFile(std::filesystem::path(file));
+ if(loaded){resetSnapshots(ui);invalidateFull(ui);UpdateWindow(ui->hwnd);}return loaded;
+}
+
+bool savePresetDialog(GuiState*ui){
+ if(!ui||!ui->hwnd)return false;
+ std::error_code error;const auto directory=ui->owner->presets.userPresetDirectory();std::filesystem::create_directories(directory,error);
+ std::wstring initial=directory.wstring();wchar_t file[4096]{};
+ std::string suggestedName=ui->owner->presets.currentName();
+ while(!suggestedName.empty()&&(suggestedName.back()=='*'||suggestedName.back()==' '))suggestedName.pop_back();
+ const std::wstring suggested=widenUtf8(suggestedName);
+ std::wcsncpy(file,suggested.c_str(),4095);
+ OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=ui->hwnd;
+ dialog.lpstrFilter=L"GrowlForge Presets (*.gfpreset)\0*.gfpreset\0\0";
+ dialog.lpstrFile=file;dialog.nMaxFile=4096;dialog.lpstrInitialDir=initial.c_str();dialog.lpstrDefExt=L"gfpreset";
+ dialog.Flags=OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+ if(!GetSaveFileNameW(&dialog))return false;
+ std::filesystem::path path(file);if(path.extension()!=L".gfpreset")path.replace_extension(L".gfpreset");
+ const bool saved=ui->owner->presets.saveFile(path,path.stem().string());
+ if(saved){resetSnapshots(ui);invalidateFull(ui);UpdateWindow(ui->hwnd);}return saved;
 }
 
 LRESULT CALLBACK windowProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
@@ -718,9 +868,14 @@ LRESULT CALLBACK windowProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
   case WM_LBUTTONDOWN:{
    SetFocus(hwnd);auto l=logicalPoint(ui,GET_X_LPARAM(lp),GET_Y_LPARAM(lp));const clap_id id=controlAt(l.X,l.Y);
    const clap_id old=ui->hover;ui->hover=id;if(old!=id)invalidateHoverTransition(ui,old,id);
-   if(id==X2||id==AutoGain){toggleParam(ui,id);return 0;}
+   if(id==X2||id==AutoGain||id==Bypass){toggleParam(ui,id);return 0;}
    if(id==ApplyAutoGain){ui->owner->setGuiParameter(ApplyAutoGain,1.0);invalidateControl(ui,ApplyAutoGain);invalidateDisplay(ui);return 0;}
-   if(id!=CLAP_INVALID_ID){ui->drag=id;ui->dragStartY=GET_Y_LPARAM(lp);ui->dragStartValue=ui->owner->parameters.values[id].load();
+   if(id==kPresetPrevious){ui->owner->presets.selectPrevious();resetSnapshots(ui);invalidateFull(ui);UpdateWindow(hwnd);return 0;}
+   if(id==kPresetNext){ui->owner->presets.selectNext();resetSnapshots(ui);invalidateFull(ui);UpdateWindow(hwnd);return 0;}
+   if(id==kPresetMenu){showPresetMenu(ui);return 0;}
+   if(id==kPresetLoad){loadPresetDialog(ui);return 0;}
+   if(id==kPresetSave){savePresetDialog(ui);return 0;}
+   if(id<kParamCount&&!isToggleParameter(id)){ui->drag=id;ui->dragStartY=GET_Y_LPARAM(lp);ui->dragStartValue=ui->owner->parameters.values[id].load();
     ui->owner->beginGuiGesture(id);SetCapture(hwnd);invalidateControl(ui,id);invalidateDisplay(ui);return 0;}
    return 0;
   }
@@ -728,11 +883,11 @@ LRESULT CALLBACK windowProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
    if(ui->drag!=CLAP_INVALID_ID){const clap_id id=ui->drag;ui->owner->endGuiGesture(id);ui->drag=CLAP_INVALID_ID;ReleaseCapture();invalidateControl(ui,id);invalidateDisplay(ui);}return 0;
   case WM_LBUTTONDBLCLK:{
    auto l=logicalPoint(ui,GET_X_LPARAM(lp),GET_Y_LPARAM(lp));const clap_id id=controlAt(l.X,l.Y);
-   if(id!=CLAP_INVALID_ID&&id!=ApplyAutoGain){ui->owner->beginGuiGesture(id);ui->owner->setGuiParameter(id,defs[id].def);ui->owner->endGuiGesture(id);invalidateControl(ui,id);invalidateDisplay(ui);}return 0;
+   if(id<kParamCount&&id!=ApplyAutoGain){ui->owner->beginGuiGesture(id);ui->owner->setGuiParameter(id,defs[id].def);ui->owner->endGuiGesture(id);invalidateControl(ui,id);invalidateDisplay(ui);}return 0;
   }
   case WM_MOUSEWHEEL:{
    POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(hwnd,&p);auto l=logicalPoint(ui,p.x,p.y);const clap_id id=controlAt(l.X,l.Y);
-   if(id!=CLAP_INVALID_ID&&id!=X2&&id!=AutoGain&&id!=ApplyAutoGain){
+   if(id<kParamCount&&!isToggleParameter(id)&&id!=ApplyAutoGain){
     const double step=((GetKeyState(VK_SHIFT)&0x8000)!=0)?0.1:((defs[id].max-defs[id].min)>24.0?1.0:0.2);
     const double value=ui->owner->parameters.values[id].load()+(GET_WHEEL_DELTA_WPARAM(wp)>0?step:-step);
     ui->owner->beginGuiGesture(id);ui->owner->setGuiParameter(id,value);ui->owner->endGuiGesture(id);

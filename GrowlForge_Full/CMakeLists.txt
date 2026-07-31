@@ -21,8 +21,10 @@ set(GROWLFORGE_SOURCES
   src/dsp/DriveStage.cpp
   src/dsp/DynamicsStage.cpp
   src/dsp/AutoGainEngine.cpp
+  src/dsp/BypassController.cpp
   src/plugin/GrowlForgePlugin.cpp
   src/state/StateManager.cpp
+  src/state/PresetManager.cpp
   src/gui/GrowlForgeGUI.cpp
 )
 
@@ -35,7 +37,7 @@ target_include_directories(GrowlForge PRIVATE
 
 if(WIN32)
   target_compile_definitions(GrowlForge PRIVATE UNICODE _UNICODE)
-  target_link_libraries(GrowlForge PRIVATE gdiplus user32 gdi32)
+  target_link_libraries(GrowlForge PRIVATE gdiplus user32 gdi32 comdlg32 shell32)
 endif()
 
 if(MSVC)

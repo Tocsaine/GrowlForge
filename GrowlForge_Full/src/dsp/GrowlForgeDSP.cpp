@@ -1,106 +1,200 @@
 #include "GrowlForgeDSP.h"
-#include "GateEngine.h"
+#include "../common/Math.h"
+#include <algorithm>
+#include <cmath>
 
 namespace growlforge {
 
 void ChannelDSP::reset() {
-    tightHP.reset();low110.reset();low180.reset();low650.reset();low1600.reset();
-    presenceLP.reset();airLP.reset();fuzzLow.reset();driveSubsonic.reset();
-    for(auto&f:antiAlias)f.reset();
-    for(auto&f:postLP)f.reset();
-    gateEnv=previousInput=0;
-    fastEnv=slowEnv=sagEnv=attackMemory=attackEnv=compEnv=driveFastEnv=driveSlowEnv=0;
-    meterSat=meterBloom=meterComp=meterSag=meterAttack=0;
-    dryRms2=wetRms2=1e-8;autoGain=1.0;
+    tightHP.reset(); low110.reset(); low180.reset(); low650.reset(); low1600.reset();
+    presenceLP.reset(); airLP.reset(); fuzzLow.reset(); driveSubsonic.reset();
+    for (auto& filter : antiAlias) filter.reset();
+    for (auto& filter : postLP) filter.reset();
+    previousInput = 0.0f;
+    fastEnv = slowEnv = sagEnv = attackMemory = attackEnv = compEnv = 0.0f;
+    driveFastEnv = driveSlowEnv = 0.0f;
+    meterSat = meterBloom = meterComp = meterSag = meterAttack = 0.0f;
 }
 
 GrowlForgeDSP::GrowlForgeDSP(ParameterStore& parameters) : parameters_(parameters) {}
 
-void GrowlForgeDSP::setSampleRate(double sampleRate) { sampleRate_ = sampleRate; }
+void GrowlForgeDSP::setSampleRate(double sampleRate) {
+    sampleRate_ = std::max(8000.0, sampleRate);
+    gate_.prepare(sampleRate_);
+    autoGain_.prepare(sampleRate_);
+    bypass_.prepare(sampleRate_);
+}
 
-void GrowlForgeDSP::reset() { for (auto& channel : channels_) channel.reset(); }
+void GrowlForgeDSP::reset() {
+    for (auto& channel : channels_) channel.reset();
+    gate_.reset();
+    autoGain_.reset();
+    bypass_.reset(parameters_.values[Bypass].load() >= 0.5);
+}
 
-bool GrowlForgeDSP::enhancersZero() const{
-  for(clap_id id=Tight;id<=PreCab;++id)if(parameters_.values[id].load()>1e-9)return false;
-  return true;
- }
+bool GrowlForgeDSP::enhancersZero() const {
+    for (clap_id id = Tight; id <= PreCab; ++id)
+        if (parameters_.values[id].load() > 1.0e-9) return false;
+    return true;
+}
 
-bool GrowlForgeDSP::additionsZero() const{
-  for(clap_id id=Bloom;id<=HarmonicBias;++id)if(parameters_.values[id].load()>1e-9)return false;
-  return true;
- }
+bool GrowlForgeDSP::additionsZero() const {
+    for (clap_id id = Bloom; id <= HarmonicBias; ++id)
+        if (parameters_.values[id].load() > 1.0e-9) return false;
+    return true;
+}
 
-bool GrowlForgeDSP::x2Enabled() const{return parameters_.values[X2].load()>=0.5;}
+bool GrowlForgeDSP::x2Enabled() const { return parameters_.values[X2].load() >= 0.5; }
+double GrowlForgeDSP::color(double value) const { return x2Enabled() ? 2.0 * value : value; }
 
-double GrowlForgeDSP::color(double v) const{return x2Enabled()?2.0*v:v;}
+void GrowlForgeDSP::configure() {
+    const double tight = color(parameters_.values[Tight].load() / 10.0);
+    const double smooth = color(parameters_.values[Smooth].load() / 10.0);
+    const double preCab = parameters_.values[PreCab].load() / 10.0;
+    const double oversampledRate = sampleRate_ * kOversample;
+    const double highpassHz = 45.0 + 115.0 * tight;
+    const double antiAliasCutoff = clamp(sampleRate_ * (0.46 - 0.23 * smooth),
+                                         5200.0, std::min(20500.0, sampleRate_ * 0.46));
+    const double openCutoff = std::min(21000.0, sampleRate_ * 0.46);
+    const double closedCutoff = 2600.0;
+    const double postCutoff = openCutoff * std::pow(closedCutoff / openCutoff, preCab);
+    for (auto& channel : channels_) {
+        channel.tightHP.setLowpass(highpassHz, sampleRate_);
+        channel.low110.setLowpass(110.0, sampleRate_);
+        channel.low180.setLowpass(180.0, sampleRate_);
+        channel.low650.setLowpass(650.0, sampleRate_);
+        channel.low1600.setLowpass(1600.0, sampleRate_);
+        channel.presenceLP.setLowpass(2600.0, sampleRate_);
+        channel.airLP.setLowpass(6500.0, sampleRate_);
+        channel.driveSubsonic.setHighpass(20.0, sampleRate_);
+        for (auto& filter : channel.antiAlias) filter.setLowpass(antiAliasCutoff, oversampledRate);
+        channel.fuzzLow.setLowpass(260.0, oversampledRate);
+        for (auto& filter : channel.postLP) filter.setLowpass(postCutoff, sampleRate_);
+    }
+}
 
-void GrowlForgeDSP::configure(){
-  double tight=color(parameters_.values[Tight].load()/10.0),smooth=color(parameters_.values[Smooth].load()/10.0),preCab=parameters_.values[PreCab].load()/10.0;
-  double osRate=sampleRate_*kOversample;
-  double hpHz=45.0+115.0*tight;
-  double aaCut=clamp(sampleRate_*(0.46-0.23*smooth),5200.0,std::min(20500.0,sampleRate_*0.46));
-  double openCut=std::min(21000.0,sampleRate_*0.46),closedCut=2600.0;
-  double postCut=openCut*std::pow(closedCut/openCut,preCab);
-  for(auto&c:channels_){
-   c.tightHP.setLowpass(hpHz,sampleRate_);c.low110.setLowpass(110,sampleRate_);c.low180.setLowpass(180,sampleRate_);
-   c.low650.setLowpass(650,sampleRate_);c.low1600.setLowpass(1600,sampleRate_);
-   c.presenceLP.setLowpass(2600,sampleRate_);c.airLP.setLowpass(6500,sampleRate_);
-   c.driveSubsonic.setHighpass(20.0,sampleRate_);
-   for(auto&f:c.antiAlias)f.setLowpass(aaCut,osRate);
-   c.fuzzLow.setLowpass(260,osRate);for(auto&f:c.postLP)f.setLowpass(postCut,sampleRate_);
-  }
- }
+float GrowlForgeDSP::processCoreSample(float input, int channelIndex) {
+    auto& channel = channels_[channelIndex];
+    const double tight = color(parameters_.values[Tight].load() / 10.0);
+    const double punch = color(parameters_.values[Punch].load() / 10.0);
+    const double body = color(parameters_.values[Body].load() / 10.0);
+    const double mass = color(parameters_.values[Mass].load() / 10.0);
+    const double growl = color(parameters_.values[Growl].load() / 10.0);
+    const double bite = color(parameters_.values[Bite].load() / 10.0);
+    const double presence = color(parameters_.values[Presence].load() / 10.0);
+    const double air = color(parameters_.values[Air].load() / 10.0);
+    const double smooth = color(parameters_.values[Smooth].load() / 10.0);
+    const double preCab = parameters_.values[PreCab].load() / 10.0;
 
-float GrowlForgeDSP::processSample(float in,int ci){
-  auto&c=channels_[ci];
-  double inputDb=parameters_.values[Input].load(),outputDb=parameters_.values[Output].load(),gate=parameters_.values[Gate].load()/10.0;
-  double tight=color(parameters_.values[Tight].load()/10.0),punch=color(parameters_.values[Punch].load()/10.0),body=color(parameters_.values[Body].load()/10.0);
-  double mass=color(parameters_.values[Mass].load()/10.0),growl=color(parameters_.values[Growl].load()/10.0),bite=color(parameters_.values[Bite].load()/10.0);
-  double presence=color(parameters_.values[Presence].load()/10.0),air=color(parameters_.values[Air].load()/10.0),smooth=color(parameters_.values[Smooth].load()/10.0);
-  double preCab=parameters_.values[PreCab].load()/10.0,parallel=parameters_.values[ParallelDry].load()/100.0;
-  float original=in,x=(float)(in*dbToGain(inputDb));
+    if (enhancersZero() && additionsZero()) return input;
 
-  if(gate>0){
-   x=GateEngine::process(x,gate,c.gateEnv,sampleRate_);
-  }
+    float x = input;
+    if (tight > 0.0) {
+        const float highpassed = channel.tightHP.hp(x);
+        x = x * static_cast<float>(1.0 - tight) + highpassed * static_cast<float>(tight);
+    }
 
-  if(enhancersZero()&&gate==0&&inputDb==0&&outputDb==0&&parameters_.values[Ceiling].load()==0&&
-     parameters_.values[AutoGain].load()<0.5&&parallel==0&&additionsZero())return original;
+    const float low = channel.low180.lp(x);
+    const float low650 = channel.low650.lp(x);
+    const float low1600 = channel.low1600.lp(x);
+    const float lowMid = low650 - low;
+    const float growlBand = low1600 - low650;
+    const float high = x - low1600;
+    const float shaped =
+        low * static_cast<float>(1.0 + 0.95 * mass) +
+        lowMid * static_cast<float>(0.58 * (1.0 + 1.25 * punch) + 0.42 * (1.0 + 1.18 * body)) +
+        growlBand * static_cast<float>(1.0 + 1.65 * growl) +
+        high * static_cast<float>(1.0 + 0.70 * bite);
 
-  if(tight>0){float hp=c.tightHP.hp(x);x=x*(float)(1-tight)+hp*(float)tight;}
+    float wet = nonlinear(shaped, low, growlBand, high, channel);
+    const float presenceBand = wet - channel.presenceLP.lp(wet);
+    const float airBand = wet - channel.airLP.lp(wet);
+    wet += presenceBand * static_cast<float>(0.95 * presence + 0.72 * bite);
+    wet += airBand * static_cast<float>(0.78 * air);
 
-  float low=c.low180.lp(x),l650=c.low650.lp(x),l1600=c.low1600.lp(x);
-  float lowMid=l650-low,growlBand=l1600-l650,high=x-l1600;
-  float shaped=
-   low*(float)(1+0.95*mass)+
-   lowMid*(float)(0.58*(1+1.25*punch)+0.42*(1+1.18*body))+
-   growlBand*(float)(1+1.65*growl)+
-   high*(float)(1+0.70*bite);
+    if (smooth > 0.0) {
+        wet -= airBand * static_cast<float>(0.88 * smooth);
+        wet -= presenceBand * static_cast<float>(0.24 * smooth);
+    }
+    if (preCab > 0.0)
+        for (auto& filter : channel.postLP) wet = filter.lp(wet);
 
-  float y=nonlinear(shaped,low,growlBand,high,c);
-  float presenceBand=y-c.presenceLP.lp(y),airBand=y-c.airLP.lp(y);
-  y+=presenceBand*(float)(0.95*presence+0.72*bite);
-  y+=airBand*(float)(0.78*air);
+    return applyNewEffects(x, wet, low, growlBand, high, channel);
+}
 
-  if(smooth>0){y-=airBand*(float)(0.88*smooth);y-=presenceBand*(float)(0.24*smooth);}
-  if(preCab>0)for(auto&f:c.postLP)y=f.lp(y);
+float GrowlForgeDSP::applyCeiling(float sample, double ceilingDb) const {
+    if (ceilingDb >= 0.0) return sample;
+    const double ceilingGain = dbToGain(ceilingDb);
+    const double normalized = sample / std::max(ceilingGain, 1.0e-6);
+    return static_cast<float>(std::tanh(normalized * 1.35) / std::tanh(1.35) * ceilingGain);
+}
 
-  y=applyNewEffects(x,y,low,growlBand,high,c);
-  y=applyAutoGain(x,y,c);
-  y=(float)(y*(1-parallel)+x*parallel);
-  y=(float)(y*dbToGain(outputDb));
+void GrowlForgeDSP::publishActivityMeters() {
+    parameters_.values[MeterSaturation] = clamp(0.5 * (channels_[0].meterSat + channels_[1].meterSat), 0.0, 100.0);
+    parameters_.values[MeterBloom] = clamp(0.5 * (channels_[0].meterBloom + channels_[1].meterBloom), 0.0, 100.0);
+    parameters_.values[MeterCompression] = clamp(0.5 * (channels_[0].meterComp + channels_[1].meterComp), 0.0, 100.0);
+    parameters_.values[MeterSag] = clamp(0.5 * (channels_[0].meterSag + channels_[1].meterSag), 0.0, 100.0);
+    parameters_.values[MeterAttack] = clamp(0.5 * (channels_[0].meterAttack + channels_[1].meterAttack), 0.0, 100.0);
+}
 
-  double ceiling=parameters_.values[Ceiling].load();
-  if(ceiling<0){
-   double cg=dbToGain(ceiling),n=y/std::max(cg,1e-6);
-   y=(float)(std::tanh(n*1.35)/std::tanh(1.35)*cg);
-  }
-  parameters_.values[MeterSaturation]=clamp(0.5*(channels_[0].meterSat+channels_[1].meterSat),0.0,100.0);
-  parameters_.values[MeterBloom]=clamp(0.5*(channels_[0].meterBloom+channels_[1].meterBloom),0.0,100.0);
-  parameters_.values[MeterCompression]=clamp(0.5*(channels_[0].meterComp+channels_[1].meterComp),0.0,100.0);
-  parameters_.values[MeterSag]=clamp(0.5*(channels_[0].meterSag+channels_[1].meterSag),0.0,100.0);
-  parameters_.values[MeterAttack]=clamp(0.5*(channels_[0].meterAttack+channels_[1].meterAttack),0.0,100.0);
-  return (float)clamp(y,-4.0,4.0);
- }
+FrameResult GrowlForgeDSP::processFrame(float left, float right, uint32_t channelCount) {
+    channelCount = std::clamp<uint32_t>(channelCount, 1u, 2u);
+    const float rawLeft = left;
+    const float rawRight = channelCount > 1 ? right : left;
+    const float inputGain = static_cast<float>(dbToGain(parameters_.values[Input].load()));
+    left = rawLeft * inputGain;
+    right = rawRight * inputGain;
+
+    const double gateAmount = parameters_.values[Gate].load() / 10.0;
+    gate_.processFrame(left, right, channelCount, gateAmount);
+
+    float wetLeft = processCoreSample(left, 0);
+    float wetRight = channelCount > 1 ? processCoreSample(right, 1) : wetLeft;
+
+    const bool autoGainEnabled = parameters_.values[AutoGain].load() >= 0.5;
+    const float autoGain = autoGain_.processFrame(left, right, wetLeft, wetRight, autoGainEnabled, channelCount);
+    wetLeft *= autoGain;
+    wetRight *= autoGain;
+
+    const float parallel = static_cast<float>(parameters_.values[ParallelDry].load() / 100.0);
+    wetLeft = wetLeft * (1.0f - parallel) + left * parallel;
+    wetRight = wetRight * (1.0f - parallel) + right * parallel;
+
+    const float outputGain = static_cast<float>(dbToGain(parameters_.values[Output].load()));
+    wetLeft *= outputGain;
+    wetRight *= outputGain;
+
+    FrameResult result;
+    result.wetPreCeilingLeft = wetLeft;
+    result.wetPreCeilingRight = wetRight;
+    const double ceiling = parameters_.values[Ceiling].load();
+    wetLeft = applyCeiling(wetLeft, ceiling);
+    wetRight = applyCeiling(wetRight, ceiling);
+
+    bypass_.processFrame(rawLeft, rawRight, wetLeft, wetRight,
+                         parameters_.values[Bypass].load() >= 0.5,
+                         result.left, result.right);
+    result.left = static_cast<float>(clamp(result.left, -4.0, 4.0));
+    result.right = static_cast<float>(clamp(result.right, -4.0, 4.0));
+    result.gateReductionPercent = gate_.reductionPercent();
+    publishActivityMeters();
+    return result;
+}
+
+double GrowlForgeDSP::currentAutoGainDb() const {
+    return autoGain_.correctionDb();
+}
+
+void GrowlForgeDSP::resetAutoGainMeasurement() {
+    autoGain_.reset();
+}
+
+void GrowlForgeDSP::applyCurrentAutoGain() {
+    const double correction = quantize01(autoGain_.commitCorrectionDb());
+    const double currentOutput = parameters_.values[Output].load();
+    parameters_.values[Output] = quantize01(clamp(currentOutput + correction, defs[Output].min, defs[Output].max));
+    parameters_.values[AutoGain] = 0.0;
+    parameters_.values[ApplyAutoGain] = 0.0;
+}
 
 } // namespace growlforge

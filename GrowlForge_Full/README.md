@@ -1,23 +1,40 @@
-# GrowlForge 2.1.0-dev
+# GrowlForge 2.1.0
 
+GrowlForge 2.1 adds the first complete workflow layer around the existing distortion engine without adding more sound-shaping knobs.
 
-## Architecture refactor in 2.1.0-dev
+## Main changes
 
-The project has been split into independent CLAP, parameter, DSP, state, and GUI modules.
-This development build intentionally preserves the complete 2.0.3 signal path and state format.
+- Auto-Gain 2.0 with stereo-linked, perceptually weighted measurement and silence hold.
+- Click-free Bypass that keeps the wet path and Auto-Gain active in the background.
+- Stereo-linked Gate with hysteresis, hold, and smooth opening/closing.
+- Peak, RMS, peak-hold, Gate-reduction, and internal-clipping feedback.
+- Project-state format 11 with migration from versions 7–10.
+- Ten factory presets plus user `.gfpreset` Load/Save, previous/next, and popup browser.
 
-Key boundaries:
+The plugin ID and parameter IDs 0–35 are unchanged. Bypass is appended as ID 36. Drive remains excluded from `×2`.
 
-- `src/plugin` — CLAP lifecycle, audio buffers, host events and extensions;
-- `src/parameters` — stable parameter definitions and atomic storage;
-- `src/dsp` — filters, Gate, Drive, motion/dynamics and Auto-Gain;
-- `src/state` — state version 10 plus migration from versions 7–10;
-- `src/gui` — the optimized Win32/GDI+ editor;
-- `src/ClapEntry.cpp` — exported CLAP entry point only.
+See `RELEASE_2.1.0.md`, `docs/ARCHITECTURE.md`, and `docs/PRESETS.md`.
 
-Regression testing against the uploaded 2.0.3 source produced bit-identical audio in eight
-stereo scenarios, an identical state blob, and bit-identical renders after loading state versions
-7, 8, 9, and 10. See `docs/ARCHITECTURE.md` and `docs/REGRESSION_2.1.0-dev.md`.
+## Build
+
+```powershell
+cd GrowlForge_Full
+.\build-windows.ps1 -Clean -VisualStudio vs2022
+```
+
+Copy the resulting `GrowlForge.clap` to:
+
+```text
+%LOCALAPPDATA%\Programs\Common\CLAP
+```
+
+Then restart the DAW and run a full CLAP rescan.
+
+## Signal position
+
+```text
+Amp / amp sim → GrowlForge → Cab / IR
+```
 
 ## Drive subsonic/DC fix in 2.0.3
 

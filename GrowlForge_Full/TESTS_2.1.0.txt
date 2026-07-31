@@ -1,0 +1,34 @@
+GrowlForge 2.1.0 validation
+============================
+
+Build
+-----
+Linux Release CMake build: PASS
+AddressSanitizer + UndefinedBehaviorSanitizer feature run: PASS
+
+Compatibility
+-------------
+Plugin ID preserved: audio.growlforge.effect
+Existing parameter IDs 0-35 preserved
+New Bypass parameter ID: 36
+State versions 7, 8, 9, 10 and 11 load successfully
+
+DSP regression
+--------------
+Untouched scenarios compared against GrowlForge 2.0.3:
+- neutral: bit-identical
+- Drive: bit-identical
+- Drive/Grind/Fuzz/Harmonic Bias: bit-identical
+- motion/dynamics: bit-identical
+- full x2 character path: bit-identical
+- Drive 10 + x2: bit-identical
+
+Feature validation
+------------------
+- Auto-Gain enable preserves manual Output: PASS
+- Auto-Gain continues measuring while bypassed: PASS
+- Bypass converges to sample-identical raw input after fade: PASS
+- Gate detector is stereo-linked: PASS
+- User preset save/load roundtrip: PASS
+- Bypass excluded from user preset: PASS
+- State 11 save/load and render: PASS

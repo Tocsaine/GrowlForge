@@ -29,24 +29,17 @@ void ParameterStore::beginGuiGesture(clap_id id) { queueGuiFlag(id, 1u); }
 void ParameterStore::endGuiGesture(clap_id id) { queueGuiFlag(id, 4u); }
 
 void ParameterStore::setGuiParameter(clap_id id, double value) {
-    if (id >= kParamCount || id == AutoGainCorrection || id >= MeterSaturation) return;
+    if (id >= kParamCount || isReadOnlyParameter(id)) return;
     if (id == ApplyAutoGain) {
         applyAutoGainPending = true;
         requestParamFlush();
         return;
     }
     value = clamp(value, defs[id].min, defs[id].max);
-    if (id == AutoGain || id == X2) value = value >= 0.5 ? 1.0 : 0.0;
+    if (isToggleParameter(id)) value = value >= 0.5 ? 1.0 : 0.0;
     else value = quantize01(value);
     const double previous = values[id].exchange(value);
-    if (id == AutoGain && previous != value) {
-        if (value >= 0.5) {
-            values[Output] = 0.0;
-            guiPendingValue[Output] = 0.0;
-            guiPendingFlags[Output].fetch_or(2u, std::memory_order_release);
-        }
-        autoGainResetPending = true;
-    }
+    if (id == AutoGain && previous != value && value >= 0.5) autoGainResetPending = true;
     guiPendingValue[id] = value;
     guiPendingFlags[id].fetch_or(2u, std::memory_order_release);
     configDirty = true;

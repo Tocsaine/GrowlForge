@@ -1,6 +1,6 @@
-# GrowlForge architecture — 2.1.0-dev
+# GrowlForge architecture — 2.1.0
 
-This refactor separates host integration, parameter ownership, DSP, state persistence, and GUI code without changing the 2.0.3 signal path.
+GrowlForge 2.1 keeps the modular host/parameter/DSP/state/GUI split introduced by the 2.1 development refactor and uses it for the first complete feature release.
 
 ## Source tree
 
@@ -18,70 +18,81 @@ src/
 │   ├── GateEngine.h/.cpp
 │   ├── DriveStage.cpp
 │   ├── DynamicsStage.cpp
-│   └── AutoGainEngine.cpp
+│   ├── AutoGainEngine.h/.cpp
+│   └── BypassController.h/.cpp
 ├── plugin/
 │   ├── GrowlForgePlugin.h/.cpp
 │   └── PluginFactory.h
 ├── state/
-│   └── StateManager.h/.cpp
+│   ├── StateManager.h/.cpp
+│   └── PresetManager.h/.cpp
 └── gui/
     └── GrowlForgeGUI.h/.cpp
 ```
 
 ## Responsibilities
 
-### `ClapEntry.cpp`
-
-Exports only the CLAP entry point and routes factory/global GUI lifetime calls. It contains no audio logic.
-
 ### `parameters/`
 
-`ParameterDefinitions` is the single source of truth for stable IDs, names, ranges, defaults, flags, and units.
+`ParameterDefinitions` remains the single source of truth for stable IDs, preset keys, names, ranges, defaults, flags, and units.
 
-`ParameterStore` owns atomic parameter values and the GUI-to-host event queue. IDs 0–35 remain unchanged.
+- IDs 0–35 are unchanged.
+- ID 36 is the new host-visible Bypass parameter.
+- Bypass carries the CLAP bypass flag.
+- Read-only activity parameters are not written to user presets.
+
+`ParameterStore` owns atomic values and the GUI-to-host event queue. Enabling Auto-Gain no longer clears the user's Output setting.
 
 ### `dsp/`
 
-`GrowlForgeDSP` owns channel state and the processing order. The implementation is split by responsibility:
+`GrowlForgeDSP` owns frame-level stereo processing and coordinates the individual engines.
 
-- `GateEngine` — the current gate detector/gain law;
-- `DriveStage` — Drive, Grind, Fuzz, Growl, Mass, Bite, Harmonic Bias and Drive DC/subsonic protection;
-- `DynamicsStage` — Bloom, Sag, Dynamics, Texture, Attack, Resonance and Compression;
-- `AutoGainEngine` — the existing 2.0.3 RMS matcher and commit behavior;
-- `Filters` — reusable one-pole and Drive high-pass filters.
+- `GateEngine` is stereo-linked, hysteretic, held, and click-free.
+- `DriveStage` retains the 2.0.3 Drive voicing and subsonic/DC fix.
+- `DynamicsStage` retains the existing Bloom, Sag, Dynamics, Texture, Attack, Resonance, and Compression behavior.
+- `AutoGainEngine` implements stereo-linked, perceptually weighted Auto-Gain 2.0.
+- `BypassController` keeps the wet path alive and crossfades to the raw input over 15 ms.
 
-No formula, coefficient, order of operations, oversampling count, parameter curve, or zero-value behavior was intentionally changed.
+The wet path continues running during bypass. This preserves filter, gate, dynamics, and Auto-Gain state so reactivation does not produce a short level burst.
 
 ### `plugin/`
 
-Owns the CLAP instance, event handling, audio buffer traversal, parameter extensions, factory, and live GUI peak publication. It delegates audio processing to `GrowlForgeDSP`.
+The CLAP layer handles events and buffer traversal, then publishes one meter snapshot containing:
+
+- stereo input peak and RMS;
+- stereo output peak and RMS;
+- internal pre-ceiling peak;
+- Gate reduction;
+- internal clipping status.
+
+GUI animation is derived from this snapshot and never runs in the audio thread.
 
 ### `state/`
 
-Owns project-state serialization and migration. State format version remains 10. Loaders for versions 7, 8, 9, and 10 remain available.
+Project state and user presets are intentionally separate.
+
+- Project state format is version 11.
+- State versions 7, 8, 9, and 10 remain loadable.
+- Project state includes Bypass and the current preset name.
+- User `.gfpreset` files use stable textual parameter keys.
+- Bypass, momentary actions, meters, and the temporary Auto-Gain correction are excluded from presets.
 
 ### `gui/`
 
-Owns the Win32/GDI+ editor and CLAP GUI extension. The optimized 2.0.2 rendering architecture is retained. GUI code now depends on the public plugin/parameter interfaces rather than being included inside the DSP translation unit.
+The optimized cached GDI+ renderer remains in place. Version 2.1 adds:
+
+- Bypass button and BYPASSED status;
+- preset previous/next, browser, Load, and Save controls;
+- RMS fill, peak trace, and peak-hold markers;
+- internal clipping warning;
+- live Gate-reduction activity;
+- current preset name and dirty-state marker.
 
 ## Preserved contracts
 
 - Plugin ID: `audio.growlforge.effect`
-- Parameter count: 36
-- Parameter IDs: unchanged
-- State format: version 10
-- State migration: versions 7–10
-- Drive excluded from `×2`
-- Drive DC/subsonic fix from 2.0.3 retained
-- Neutral default remains sample-identical bypass
-- Existing GUI behavior and rendering logic retained
-
-## Extension points for 2.1
-
-The next features now have isolated locations:
-
-- Auto-Gain 2.0: replace internals in `AutoGainEngine.cpp`;
-- improved Gate: replace internals in `GateEngine.cpp`;
-- click-free Bypass: add `BypassController` and one appended parameter ID;
-- richer metering: add a dedicated meter snapshot without touching GUI input handling;
-- presets: add `PresetManager` beside `StateManager`, keeping project state and user preset formats separate.
+- Existing parameter IDs 0–35: unchanged
+- Drive remains excluded from `×2`
+- Drive DC/subsonic fix from 2.0.3: retained
+- Untouched DSP scenarios remain bit-identical to 2.0.3
+- State migration: versions 7–11
