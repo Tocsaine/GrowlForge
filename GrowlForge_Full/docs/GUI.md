@@ -58,3 +58,11 @@ labels, inactive meter segments, and knob bodies are rendered only when the edit
 created or resized. Mouse interaction invalidates only the affected control and the top
 value display. The 30 Hz animation timer redraws only the live meter and activity regions
 and is stopped while the editor is hidden.
+
+
+## Source separation in 2.1.0-dev
+
+The Win32 renderer now compiles as `src/gui/GrowlForgeGUI.cpp` instead of being included
+inside the monolithic audio source. Rendering behavior, cache strategy, control geometry, and
+CLAP GUI behavior are unchanged. The GUI reads parameter and meter data through the shared
+plugin/parameter interfaces.

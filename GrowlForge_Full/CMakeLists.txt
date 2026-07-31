@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(GrowlForge VERSION 2.0.3 LANGUAGES CXX)
+project(GrowlForge VERSION 2.1.0 LANGUAGES CXX)
 
 if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR
@@ -12,9 +12,24 @@ message(STATUS "GrowlForge generator platform: ${CMAKE_GENERATOR_PLATFORM}")
 message(STATUS "GrowlForge pointer size: ${CMAKE_SIZEOF_VOID_P}")
 message(STATUS "GrowlForge C++ compiler: ${CMAKE_CXX_COMPILER}")
 
-add_library(GrowlForge MODULE src/GrowlForge.cpp)
+set(GROWLFORGE_SOURCES
+  src/ClapEntry.cpp
+  src/parameters/ParameterDefinitions.cpp
+  src/parameters/ParameterStore.cpp
+  src/dsp/GrowlForgeDSP.cpp
+  src/dsp/GateEngine.cpp
+  src/dsp/DriveStage.cpp
+  src/dsp/DynamicsStage.cpp
+  src/dsp/AutoGainEngine.cpp
+  src/plugin/GrowlForgePlugin.cpp
+  src/state/StateManager.cpp
+  src/gui/GrowlForgeGUI.cpp
+)
+
+add_library(GrowlForge MODULE ${GROWLFORGE_SOURCES})
 target_compile_features(GrowlForge PRIVATE cxx_std_20)
 target_include_directories(GrowlForge PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src"
   "${CMAKE_CURRENT_SOURCE_DIR}/external/clap/include"
 )
 

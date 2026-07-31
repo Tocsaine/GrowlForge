@@ -1,0 +1,40 @@
+GrowlForge 2.1.0-dev architecture verification
+================================================
+
+Reference: uploaded GrowlForge 2.0.3 source, rebuilt in Release mode.
+Candidate: modular 2.1.0-dev source, built in Release mode.
+
+Audio regression
+----------------
+- 48 kHz, stereo float32, 128-sample blocks.
+- Eight 3-second scenarios covering:
+  neutral pass-through; Drive; Drive/Grind/Fuzz/Harmonic Bias;
+  Gate/tone shaping; motion/dynamics; Auto-Gain/output routing;
+  broad x2 stress settings; Drive 10 with x2 enabled.
+- Result for every scenario:
+  max absolute difference = 0
+  RMS difference          = 0
+  non-zero sample count   = 0
+
+CLAP parameter contract
+-----------------------
+- Plugin ID and name: identical.
+- Parameter count: 36 in both builds.
+- IDs, flags, names, modules, ranges and defaults: identical.
+- Only the descriptor version string changed to 2.1.0-dev.
+
+State verification
+------------------
+- Non-default saved state: byte-identical, 296 bytes.
+- SHA-256 for reference and candidate state:
+  1743bc8a33833a5daff103aab1bcde712dc5021bd2dcbff561dacce007f6b7a1
+- State versions 7, 8, 9 and 10 loaded and rendered identically.
+
+Build verification
+------------------
+- GCC 14.2 C++20 Release build: passed without errors.
+- Portable Ninja preset: passed.
+- GUI implementation body was mechanically preserved; only access to the
+  parameter array was routed through ParameterStore.
+- Native MSVC/Windows SDK compilation was not available in the Linux test
+  environment and must still be run locally with build-windows.ps1.

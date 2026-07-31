@@ -1,5 +1,23 @@
-# GrowlForge 2.0.3
+# GrowlForge 2.1.0-dev
 
+
+## Architecture refactor in 2.1.0-dev
+
+The project has been split into independent CLAP, parameter, DSP, state, and GUI modules.
+This development build intentionally preserves the complete 2.0.3 signal path and state format.
+
+Key boundaries:
+
+- `src/plugin` — CLAP lifecycle, audio buffers, host events and extensions;
+- `src/parameters` — stable parameter definitions and atomic storage;
+- `src/dsp` — filters, Gate, Drive, motion/dynamics and Auto-Gain;
+- `src/state` — state version 10 plus migration from versions 7–10;
+- `src/gui` — the optimized Win32/GDI+ editor;
+- `src/ClapEntry.cpp` — exported CLAP entry point only.
+
+Regression testing against the uploaded 2.0.3 source produced bit-identical audio in eight
+stereo scenarios, an identical state blob, and bit-identical renders after loading state versions
+7, 8, 9, and 10. See `docs/ARCHITECTURE.md` and `docs/REGRESSION_2.1.0-dev.md`.
 
 ## Drive subsonic/DC fix in 2.0.3
 
