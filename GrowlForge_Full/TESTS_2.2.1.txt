@@ -1,0 +1,12 @@
+GrowlForge 2.2.1 validation
+
+- Linux Release build: passed
+- Feature validation (Auto-Gain / Bypass / stereo Gate): passed
+- Workflow validation (A/B / Undo / Redo / copy): passed
+- Preset validation (save / overwrite / rename / delete): passed
+- Project-state roundtrip: passed
+- Ceiling validation at -12 dBFS: peak 0.251188636, exactly -12.0000 dBFS
+- GUI source updated to remove the duplicate top A/B badge
+- Bottom workflow controls repacked to end at x=695, before the output-meter L label
+
+Windows GDI+ code was not compiled with MSVC in this Linux environment.

@@ -124,9 +124,21 @@ float GrowlForgeDSP::processCoreSample(float input, int channelIndex) {
 
 float GrowlForgeDSP::applyCeiling(float sample, double ceilingDb) const {
     if (ceilingDb >= 0.0) return sample;
-    const double ceilingGain = dbToGain(ceilingDb);
-    const double normalized = sample / std::max(ceilingGain, 1.0e-6);
-    return static_cast<float>(std::tanh(normalized * 1.35) / std::tanh(1.35) * ceilingGain);
+
+    // Ceiling is an exact output cap. A narrow cubic knee keeps the transition
+    // less abrupt, while the final clamp guarantees that the requested dBFS
+    // value can never be exceeded in the active wet path.
+    const float ceilingGain = static_cast<float>(dbToGain(ceilingDb));
+    const float magnitude = std::abs(sample);
+    const float kneeStart = ceilingGain * 0.90f;
+
+    if (magnitude <= kneeStart) return sample;
+    if (magnitude >= ceilingGain) return std::copysign(ceilingGain, sample);
+
+    const float t = (magnitude - kneeStart) / std::max(ceilingGain - kneeStart, 1.0e-9f);
+    const float shaped = t + t * t - t * t * t; // f(0)=0, f'(0)=1, f(1)=1, f'(1)=0
+    const float limited = kneeStart + (ceilingGain - kneeStart) * shaped;
+    return std::copysign(std::min(limited, ceilingGain), sample);
 }
 
 void GrowlForgeDSP::publishActivityMeters() {

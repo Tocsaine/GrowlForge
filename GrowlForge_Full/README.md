@@ -1,4 +1,4 @@
-# GrowlForge 2.2.0
+# GrowlForge 2.2.1
 
 GrowlForge 2.2 focuses on fast personal workflow without changing the DSP character introduced in 2.1.
 
@@ -15,7 +15,7 @@ GrowlForge 2.2 focuses on fast personal workflow without changing the DSP charac
 
 The DSP, plugin ID, parameter IDs, Auto-Gain 2.0, Gate, Bypass, meters, and Drive behavior are unchanged from 2.1.0.
 
-See `RELEASE_2.2.0.md`, `docs/ARCHITECTURE.md`, and `docs/PRESETS.md`.
+See `RELEASE_2.2.1.md`, `docs/ARCHITECTURE.md`, and `docs/PRESETS.md`.
 
 ## Build
 

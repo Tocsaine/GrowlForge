@@ -331,7 +331,7 @@ const clap_plugin_descriptor_t descriptor{
     "GrowlForge",
     "OpenAI / User Project",
     "", "", "",
-    "2.2.0",
+    "2.2.1",
     "Personal guitar character processor with A/B comparison, Undo/Redo and protected user presets.",
     features
 };

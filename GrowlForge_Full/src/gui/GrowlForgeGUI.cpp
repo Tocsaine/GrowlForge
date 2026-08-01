@@ -520,7 +520,7 @@ void drawStaticUi(Graphics&g,GuiState*ui,float renderScale){
 
  fillRounded(g,ui,RectF(8.0f,8.0f,1184.0f,72.0f),9.0f,colorPanel2(),colorLine());
  drawText(g,ui,L"GROWLFORGE",RectF(30.0f,19.0f,280.0f,42.0f),31.0f,colorText(),FontStyleBold,StringAlignmentNear);
- drawText(g,ui,L"2.2",RectF(278.0f,26.0f,70.0f,26.0f),17.0f,colorOrange(),FontStyleBold,StringAlignmentNear);
+ drawText(g,ui,L"2.2.1",RectF(278.0f,26.0f,80.0f,26.0f),17.0f,colorOrange(),FontStyleBold,StringAlignmentNear);
  fillRounded(g,ui,RectF(390.0f,15.0f,380.0f,57.0f),7.0f,Color(255,8,10,12),Color(255,56,59,62));
 
  drawSection(g,ui,RectF(10.0f,90.0f,330.0f,360.0f),L"INPUT & FEEL",false);
@@ -564,10 +564,7 @@ void drawDynamicUi(Graphics&g,GuiState*ui,const RectF&dirty){
   const clap_id active=activeDisplayId(ui);
   wchar_t value[64]{};formatParam(ui->owner,active,value,64);
   const std::wstring preset=widenUtf8(ui->owner->presets.currentName());
-  const bool slotB=ui->owner->workflow.activeSlot()==1;
-  fillRounded(g,ui,RectF(405.0f,16.0f,22.0f,15.0f),4.0f,slotB?Color(255,24,54,57):Color(255,64,42,20),slotB?colorTeal():colorOrange());
-  drawText(g,ui,slotB?L"B":L"A",RectF(405.0f,16.0f,22.0f,15.0f),9.0f,slotB?colorTeal():colorOrange(),FontStyleBold);
-  drawText(g,ui,preset.c_str(),RectF(432.0f,16.0f,323.0f,15.0f),10.5f,colorMuted(),FontStyleBold);
+  drawText(g,ui,preset.c_str(),RectF(405.0f,16.0f,350.0f,15.0f),10.5f,colorMuted(),FontStyleBold);
   drawText(g,ui,labelFor(active),RectF(405.0f,29.0f,350.0f,15.0f),10.5f,active==Drive?colorOrange():colorTeal(),FontStyleBold);
   drawText(g,ui,value,RectF(405.0f,41.0f,350.0f,27.0f),20.0f,colorText(),FontStyleBold);
   if(ui->owner->parameters.values[Bypass].load()>=0.5)
@@ -592,12 +589,12 @@ void drawDynamicUi(Graphics&g,GuiState*ui,const RectF&dirty){
  if(rectIntersects(dirty,bypassRect))drawHeaderButton(bypassRect,L"BYPASS",Bypass,ui->owner->parameters.values[Bypass].load()>=0.5,true);
  if(rectIntersects(dirty,x2r))drawHeaderButton(x2r,L"×2 COLOR",X2,ui->owner->parameters.values[X2].load()>=0.5,true);
 
- const RectF undoRect(488.0f,660.0f,32.0f,30.0f);
- const RectF redoRect(524.0f,660.0f,32.0f,30.0f);
- const RectF slotARect(562.0f,660.0f,30.0f,30.0f);
- const RectF slotBRect(596.0f,660.0f,30.0f,30.0f);
- const RectF copyABRect(632.0f,660.0f,38.0f,30.0f);
- const RectF copyBARect(674.0f,660.0f,38.0f,30.0f);
+ const RectF undoRect(495.0f,660.0f,26.0f,30.0f);
+ const RectF redoRect(525.0f,660.0f,26.0f,30.0f);
+ const RectF slotARect(555.0f,660.0f,28.0f,30.0f);
+ const RectF slotBRect(587.0f,660.0f,28.0f,30.0f);
+ const RectF copyABRect(619.0f,660.0f,36.0f,30.0f);
+ const RectF copyBARect(659.0f,660.0f,36.0f,30.0f);
  auto drawWorkflowButton=[&](const RectF&r,const wchar_t*label,clap_id id,bool active,bool enabled){
   const Color accent=active?colorOrange():colorTeal();
   const Color border=!enabled?Color(255,48,52,55):((ui->hover==id||active)?accent:colorLine());
@@ -605,7 +602,7 @@ void drawDynamicUi(Graphics&g,GuiState*ui,const RectF&dirty){
   fillRounded(g,ui,r,5.0f,fill,border);
   drawText(g,ui,label,r,10.5f,enabled?(active?accent:colorText()):Color(255,76,81,85),FontStyleBold);
  };
- const RectF workflowRect(484.0f,656.0f,232.0f,38.0f);
+ const RectF workflowRect(491.0f,656.0f,208.0f,38.0f);
  if(rectIntersects(dirty,workflowRect)){
   const uint32_t activeSlot=ui->owner->workflow.activeSlot();
   drawWorkflowButton(undoRect,L"↶",kUndo,false,ui->owner->workflow.canUndo());
@@ -701,7 +698,7 @@ void invalidateControl(GuiState*ui,clap_id id){
  if(id==X2){invalidateLogical(ui,RectF(1029.0f,19.0f,148.0f,49.0f),2.0f);return;}
  if(id==Bypass){invalidateLogical(ui,RectF(933.0f,21.0f,94.0f,45.0f),2.0f);invalidateDisplay(ui);return;}
  if(id==kPresetPrevious||id==kPresetNext||id==kPresetLoad||id==kPresetSave||id==kPresetMenu){invalidateLogical(ui,RectF(346.0f,20.0f,588.0f,48.0f),2.0f);invalidateDisplay(ui);return;}
- if(id==kUndo||id==kRedo||id==kSlotA||id==kSlotB||id==kCopyAToB||id==kCopyBToA){invalidateLogical(ui,RectF(484.0f,656.0f,232.0f,38.0f),2.0f);invalidateDisplay(ui);return;}
+ if(id==kUndo||id==kRedo||id==kSlotA||id==kSlotB||id==kCopyAToB||id==kCopyBToA){invalidateLogical(ui,RectF(491.0f,656.0f,208.0f,38.0f),2.0f);invalidateDisplay(ui);return;}
  if(id==AutoGain){invalidateLogical(ui,RectF(868.0f,506.0f,108.0f,64.0f),2.0f);invalidateLogical(ui,RectF(870.0f,569.0f,104.0f,31.0f),2.0f);return;}
  if(id==ApplyAutoGain||id==AutoGainCorrection){invalidateLogical(ui,RectF(870.0f,569.0f,104.0f,31.0f),2.0f);return;}
 }
@@ -724,12 +721,12 @@ clap_id controlAt(float x,float y){
  if(inRect(x,y,RectF(1032.0f,22.0f,142.0f,43.0f)))return X2;
  if(inRect(x,y,RectF(881.0f,510.0f,82.0f,38.0f)))return AutoGain;
  if(inRect(x,y,RectF(873.0f,572.0f,98.0f,25.0f)))return ApplyAutoGain;
- if(inRect(x,y,RectF(488.0f,660.0f,32.0f,30.0f)))return kUndo;
- if(inRect(x,y,RectF(524.0f,660.0f,32.0f,30.0f)))return kRedo;
- if(inRect(x,y,RectF(562.0f,660.0f,30.0f,30.0f)))return kSlotA;
- if(inRect(x,y,RectF(596.0f,660.0f,30.0f,30.0f)))return kSlotB;
- if(inRect(x,y,RectF(632.0f,660.0f,38.0f,30.0f)))return kCopyAToB;
- if(inRect(x,y,RectF(674.0f,660.0f,38.0f,30.0f)))return kCopyBToA;
+ if(inRect(x,y,RectF(495.0f,660.0f,26.0f,30.0f)))return kUndo;
+ if(inRect(x,y,RectF(525.0f,660.0f,26.0f,30.0f)))return kRedo;
+ if(inRect(x,y,RectF(555.0f,660.0f,28.0f,30.0f)))return kSlotA;
+ if(inRect(x,y,RectF(587.0f,660.0f,28.0f,30.0f)))return kSlotB;
+ if(inRect(x,y,RectF(619.0f,660.0f,36.0f,30.0f)))return kCopyAToB;
+ if(inRect(x,y,RectF(659.0f,660.0f,36.0f,30.0f)))return kCopyBToA;
  return CLAP_INVALID_ID;
 }
 
@@ -1132,7 +1129,7 @@ void globalShutdown(){
 
 bool createWindow(GuiState*ui,HWND parent){
  if(!ui||!parent)return false;if(ui->hwnd)return true;ui->parent=parent;
- ui->hwnd=CreateWindowExW(0,kWindowClass,L"GrowlForge 2.2",WS_CHILD|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
+ ui->hwnd=CreateWindowExW(0,kWindowClass,L"GrowlForge 2.2.1",WS_CHILD|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
                           0,0,(int)ui->width,(int)ui->height,parent,nullptr,gModule,ui);
  return ui->hwnd!=nullptr;
 }
