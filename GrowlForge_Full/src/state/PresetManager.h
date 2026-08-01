@@ -13,9 +13,19 @@ struct Preset {
     std::string name;
     std::string author;
     std::string description;
+    std::string category;
+    std::string inspiredBy;
+    std::string referenceChain;
     std::array<double, kParamCount> values{};
     bool factory = false;
     std::filesystem::path path;
+};
+
+struct PresetInfo {
+    size_t index = 0;
+    std::string name;
+    std::string category;
+    bool factory = false;
 };
 
 class PresetManager {
@@ -37,6 +47,9 @@ public:
     std::string currentName() const;
     std::string currentCleanName() const;
     std::string currentDescription() const;
+    std::string currentCategory() const;
+    std::string currentInspiredBy() const;
+    std::string currentReferenceChain() const;
     std::filesystem::path currentPath() const;
     bool currentIsFactory() const;
     bool currentIsUser() const;
@@ -44,6 +57,7 @@ public:
     size_t presetCount() const;
     size_t currentIndex() const;
     std::vector<std::string> presetNames() const;
+    std::vector<PresetInfo> presetInfos() const;
     void markDirty();
     void setCurrentNameFromState(const std::string& name);
 

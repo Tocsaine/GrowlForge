@@ -1,41 +1,38 @@
-# GrowlForge presets — 2.2
+# GrowlForge presets — 2.2.2
 
-## Factory bank
+Open the preset menu by clicking the preset name in the top bar.
 
-GrowlForge 2.2 contains sixteen embedded factory presets. The original ten remain, plus six personal starting points:
+Factory presets are grouped into:
 
-- Tactile Crunch
-- Dense but Clear
-- Low String Clamp
-- Velvet Violence
-- Glass Teeth
-- Living Fuzz
+- **Pre-Amp** — GrowlForge before the amp simulator;
+- **Post-Amp** — GrowlForge after the amp and cabinet;
+- **Creative** — experimental and destructive combinations.
 
-Use the left/right arrows to cycle presets. Click the preset name to open the complete preset menu.
+User presets appear under **User Presets**.
+
+## Nolly reference setup
+
+The album-inspired factory bank assumes the Archetype Nolly X Rhythm amp as a neutral metal foundation.
+
+Recommended starting setup:
+
+```text
+Pre-Amp:  Guitar / DI -> GrowlForge -> Nolly Rhythm -> Nolly Cab
+Post-Amp: Guitar / DI -> Nolly Rhythm -> Nolly Cab -> GrowlForge
+```
+
+Start with Nolly's boost, gate and doubler disabled; gain around 4–5; EQ, resonance and presence near noon; and output at unity.
+
+These presets are tonal interpretations, not captures or exact replicas. Guitar, tuning, pickups, cabinet choice, playing and mix context still matter.
 
 ## User preset workflow
 
-`SAVE` now behaves intelligently:
+`SAVE` overwrites a user preset and opens Save As for a factory preset. The menu provides Save As, Rename, Delete, Refresh and Open Preset Folder.
 
-- a user preset is overwritten in place;
-- a factory preset or project state opens Save As.
-
-The preset menu also provides:
-
-- Save As;
-- Rename;
-- Delete;
-- Refresh preset list;
-- Open preset folder.
-
-Before loading another preset, GrowlForge asks whether modified settings should be saved, discarded, or kept by cancelling the operation.
-
-User presets use `.gfpreset` and are stored by default in:
+User presets are stored by default in:
 
 ```text
 %APPDATA%\GrowlForge\Presets
 ```
 
-Preset writes use a temporary file and backup replacement so an interrupted overwrite does not silently destroy the previous preset.
-
-Presets contain sound settings only. They exclude Bypass, Apply Auto-Gain, meter values, temporary Auto-Gain correction, A/B workflow state, and GUI animation state.
+Preset writes use temporary and backup files. Presets exclude Bypass, activity meters, temporary Auto-Gain correction and A/B workflow state.

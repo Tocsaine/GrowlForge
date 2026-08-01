@@ -520,7 +520,7 @@ void drawStaticUi(Graphics&g,GuiState*ui,float renderScale){
 
  fillRounded(g,ui,RectF(8.0f,8.0f,1184.0f,72.0f),9.0f,colorPanel2(),colorLine());
  drawText(g,ui,L"GROWLFORGE",RectF(30.0f,19.0f,280.0f,42.0f),31.0f,colorText(),FontStyleBold,StringAlignmentNear);
- drawText(g,ui,L"2.2.1",RectF(278.0f,26.0f,80.0f,26.0f),17.0f,colorOrange(),FontStyleBold,StringAlignmentNear);
+ drawText(g,ui,L"2.2.2",RectF(278.0f,26.0f,80.0f,26.0f),17.0f,colorOrange(),FontStyleBold,StringAlignmentNear);
  fillRounded(g,ui,RectF(390.0f,15.0f,380.0f,57.0f),7.0f,Color(255,8,10,12),Color(255,56,59,62));
 
  drawSection(g,ui,RectF(10.0f,90.0f,330.0f,360.0f),L"INPUT & FEEL",false);
@@ -968,16 +968,40 @@ void openPresetFolder(GuiState*ui){
 
 bool showPresetMenu(GuiState*ui){
  if(!ui||!ui->hwnd)return false;
- const auto names=ui->owner->presets.presetNames();
- if(names.empty())return false;
+ const auto infos=ui->owner->presets.presetInfos();
+ if(infos.empty())return false;
  HMENU menu=CreatePopupMenu();if(!menu)return false;
+ HMENU preMenu=CreatePopupMenu();
+ HMENU postMenu=CreatePopupMenu();
+ HMENU creativeMenu=CreatePopupMenu();
+ HMENU userMenu=CreatePopupMenu();
+ if(!preMenu||!postMenu||!creativeMenu||!userMenu){DestroyMenu(menu);return false;}
  constexpr UINT kBase=2000;
  constexpr UINT kSave=3100,kSaveAs=3101,kRename=3102,kDelete=3103,kRefresh=3104,kOpenFolder=3105;
  const size_t current=ui->owner->presets.currentIndex();
- for(size_t i=0;i<names.size();++i){
-  const std::wstring name=widenUtf8(names[i]);
-  AppendMenuW(menu,MF_STRING|(i==current?MF_CHECKED:0),kBase+(UINT)i,name.c_str());
+ bool hasPre=false,hasPost=false,hasCreative=false,hasUser=false;
+ for(const auto&info:infos){
+  const std::wstring name=widenUtf8(info.name);
+  const UINT flags=MF_STRING|(info.index==current?MF_CHECKED:0);
+  const UINT command=kBase+(UINT)info.index;
+  if(info.category=="Utility"){
+   AppendMenuW(menu,flags,command,name.c_str());
+  }else if(!info.factory){
+   AppendMenuW(userMenu,flags,command,name.c_str());hasUser=true;
+  }else if(info.category=="Pre-Amp"){
+   AppendMenuW(preMenu,flags,command,name.c_str());hasPre=true;
+  }else if(info.category=="Post-Amp"){
+   AppendMenuW(postMenu,flags,command,name.c_str());hasPost=true;
+  }else{
+   AppendMenuW(creativeMenu,flags,command,name.c_str());hasCreative=true;
+  }
  }
+ AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
+ if(hasPre)AppendMenuW(menu,MF_POPUP,reinterpret_cast<UINT_PTR>(preMenu),L"Pre-Amp");
+ if(hasPost)AppendMenuW(menu,MF_POPUP,reinterpret_cast<UINT_PTR>(postMenu),L"Post-Amp");
+ if(hasCreative)AppendMenuW(menu,MF_POPUP,reinterpret_cast<UINT_PTR>(creativeMenu),L"Creative");
+ if(!hasUser)AppendMenuW(userMenu,MF_STRING|MF_GRAYED,0,L"(No user presets)");
+ AppendMenuW(menu,MF_POPUP,reinterpret_cast<UINT_PTR>(userMenu),L"User Presets");
  AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
  AppendMenuW(menu,MF_STRING,kSave,L"Save");
  AppendMenuW(menu,MF_STRING,kSaveAs,L"Save As...");
@@ -989,7 +1013,7 @@ bool showPresetMenu(GuiState*ui){
  POINT p{405,34};ClientToScreen(ui->hwnd,&p);
  const UINT command=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_LEFTALIGN|TPM_TOPALIGN|TPM_NONOTIFY,p.x,p.y,0,ui->hwnd,nullptr);
  DestroyMenu(menu);
- if(command>=kBase&&command<kBase+names.size())return applyPresetIndex(ui,command-kBase);
+ if(command>=kBase&&command<kBase+infos.size())return applyPresetIndex(ui,command-kBase);
  switch(command){
   case kSave:return saveCurrentPresetSmart(ui);
   case kSaveAs:return savePresetDialog(ui);
@@ -1129,7 +1153,7 @@ void globalShutdown(){
 
 bool createWindow(GuiState*ui,HWND parent){
  if(!ui||!parent)return false;if(ui->hwnd)return true;ui->parent=parent;
- ui->hwnd=CreateWindowExW(0,kWindowClass,L"GrowlForge 2.2.1",WS_CHILD|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
+ ui->hwnd=CreateWindowExW(0,kWindowClass,L"GrowlForge 2.2.2",WS_CHILD|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
                           0,0,(int)ui->width,(int)ui->height,parent,nullptr,gModule,ui);
  return ui->hwnd!=nullptr;
 }

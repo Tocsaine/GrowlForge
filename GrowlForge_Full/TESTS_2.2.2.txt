@@ -1,0 +1,31 @@
+GrowlForge 2.2.2 validation
+===========================
+
+Build
+- Linux Release build: PASS
+
+DSP regression against provided GrowlForge 2.2.1
+- Scenario 0: bit-identical
+- Scenario 1: bit-identical
+- Scenario 2: bit-identical
+- Scenario 3: bit-identical
+- Scenario 4: bit-identical
+- Scenario 5: bit-identical
+- Scenario 6: bit-identical
+- Scenario 7: bit-identical
+- State save: bit-identical
+
+Preset-bank validation
+- Pre-Amp factory presets: 10
+- Post-Amp factory presets: 10
+- Creative factory presets: 7
+- Utility presets: 1
+- Total embedded factory presets: 28
+- All 10 requested artist / album references present
+- Every factory preset loads successfully
+- Every parameter remains finite and inside its declared range
+- Presets do not alter Bypass
+- Version-3 preset metadata serializes correctly
+- Version-2 user presets remain loadable
+
+The DSP, parameter IDs and project-state format are unchanged.

@@ -15,12 +15,16 @@ void set(std::array<double, kParamCount>& values, clap_id id, double value) {
     values[id] = value;
 }
 
-Preset factoryPreset(const char* name, const char* description,
-                     const std::initializer_list<std::pair<clap_id, double>>& changes) {
+Preset factoryPreset(const char* category, const char* name, const char* description,
+                     const std::initializer_list<std::pair<clap_id, double>>& changes,
+                     const char* inspiredBy = "", const char* referenceChain = "") {
     Preset preset;
     preset.name = name;
     preset.author = "GrowlForge";
     preset.description = description;
+    preset.category = category;
+    preset.inspiredBy = inspiredBy;
+    preset.referenceChain = referenceChain;
     preset.factory = true;
     for (size_t i = 0; i < kParamCount; ++i) preset.values[i] = defs[i].def;
     for (const auto& [id, value] : changes) set(preset.values, id, value);
@@ -88,40 +92,124 @@ std::array<double, kParamCount> PresetManager::defaultValues() {
 }
 
 std::vector<Preset> PresetManager::makeFactoryPresets() {
-    return {
-        factoryPreset("Init", "Neutral starting point.", {}),
-        factoryPreset("Controlled Fuzz", "Tactile fuzz with preserved pick response.",
-                      {{Drive,3.8},{Fuzz,6.2},{Body,2.4},{Bite,1.8},{Smooth,2.0},{Attack,1.4},{Output,-1.0}}),
-        factoryPreset("Modern Rhythm", "Tight, dense post-amp rhythm shaping.",
-                      {{Gate,3.2},{Tight,6.4},{Punch,4.8},{Body,3.0},{Mass,2.5},{Growl,3.4},{Drive,6.5},{Grind,3.2},{Bite,4.0},{Presence,2.8},{Smooth,1.6},{Attack,2.8},{Compression,1.5},{Output,-1.5}}),
-        factoryPreset("Palm Weight", "Extra low-mid impact without loose sub bass.",
-                      {{Gate,2.2},{Tight,4.5},{Punch,6.0},{Body,4.0},{Mass,5.4},{Drive,4.8},{Resonance,3.8},{Sag,1.6},{Smooth,1.4},{Output,-1.0}}),
-        factoryPreset("Post Amp Bite", "Adds articulation and controlled edge after an amp sim.",
-                      {{Drive,3.0},{Grind,2.1},{Bite,5.8},{Presence,4.2},{Air,2.2},{Smooth,1.8},{Texture,2.0},{Attack,3.4},{ParallelDry,8.0},{Output,-0.8}}),
-        factoryPreset("Synth Growl", "Harmonic movement for basses and monophonic synths.",
-                      {{Body,3.2},{Mass,4.0},{Growl,7.0},{Drive,5.2},{Grind,2.7},{HarmonicBias,4.5},{Bloom,2.8},{Dynamics,3.0},{Texture,3.8},{Smooth,2.2},{Output,-2.0}}),
-        factoryPreset("Crushed Bloom", "Destroyed sustain with audible motion.",
-                      {{Drive,7.4},{Grind,5.2},{Fuzz,3.6},{Bloom,7.0},{Sag,5.0},{Compression,7.2},{Dynamics,4.2},{Texture,4.4},{Smooth,3.8},{Output,-3.0}}),
-        factoryPreset("Parallel Attack", "Dense wet body with a clean transient edge.",
-                      {{Tight,3.0},{Punch,3.8},{Drive,6.2},{Growl,2.6},{Compression,4.0},{Attack,4.2},{ParallelDry,22.0},{Presence,2.4},{Output,-1.2}}),
-        factoryPreset("Wide Open", "Open, bright distortion with restrained smoothing.",
-                      {{Drive,5.8},{Growl,2.0},{Bite,3.8},{Presence,3.5},{Air,4.5},{Texture,1.8},{Attack,2.0},{Output,-1.0}}),
-        factoryPreset("Color x2", "A deliberately exaggerated character preset.",
-                      {{X2,1.0},{Growl,4.0},{Grind,3.0},{Fuzz,2.0},{Bloom,2.5},{Sag,2.5},{Texture,2.8},{HarmonicBias,2.8},{Smooth,2.0},{Output,-2.0}}),
+    constexpr const char* preNolly =
+        "GrowlForge before Archetype Nolly X Rhythm amp; start with Nolly boost off, amp gain around 4-5, EQ near noon.";
+    constexpr const char* postNolly =
+        "Archetype Nolly X Rhythm amp and cab first, then GrowlForge; start with Nolly EQ near noon and output at unity.";
 
-        // Personal starter bank for quick experimentation.
-        factoryPreset("Tactile Crunch", "Responsive medium drive that keeps the pick close to the fingers.",
-                      {{Drive,4.8},{Punch,2.8},{Body,2.3},{Growl,1.7},{Bite,2.0},{Attack,2.6},{Compression,0.8},{Output,-0.7}}),
-        factoryPreset("Dense but Clear", "More density and sustain without burying chord detail.",
-                      {{Tight,3.4},{Punch,3.0},{Body,3.2},{Mass,2.2},{Drive,6.0},{Grind,1.8},{Presence,2.4},{Smooth,1.7},{Compression,2.6},{ParallelDry,7.0},{Output,-1.3}}),
-        factoryPreset("Low String Clamp", "Firm low-string control for fast riffs and hard palm mutes.",
-                      {{Gate,3.8},{Tight,7.1},{Punch,5.6},{Mass,3.2},{Drive,5.4},{Grind,2.8},{Resonance,2.0},{Attack,3.5},{Output,-1.2}}),
-        factoryPreset("Velvet Violence", "Heavy saturation with softened edges and a breathing tail.",
-                      {{Drive,7.0},{Growl,3.6},{Fuzz,1.8},{Bloom,3.8},{Sag,3.4},{Compression,4.6},{Smooth,4.2},{Texture,2.5},{Air,1.2},{Output,-2.4}}),
-        factoryPreset("Glass Teeth", "Bright, cutting articulation that stays controlled at the top.",
+    return {
+        factoryPreset("Utility", "Init", "Neutral starting point.", {}),
+
+        // PRE-AMP: general-purpose starting points.
+        factoryPreset("Pre-Amp", "Tight Foundation",
+                      "A balanced front-end clamp: tighter lows, firmer pick response and very little extra distortion.",
+                      {{Gate,2.2},{Tight,6.2},{Punch,3.8},{Body,1.6},{Mass,1.0},{Drive,1.2},{Grind,1.0},{Attack,2.8}},
+                      "", preNolly),
+        factoryPreset("Pre-Amp", "Low-Tuned Clamp",
+                      "Hard low-string control for extended-range rhythm playing without hollowing out the note body.",
+                      {{Gate,4.2},{Tight,8.0},{Punch,5.5},{Body,1.2},{Mass,2.0},{Growl,1.5},{Drive,1.5},{Grind,2.5},{Attack,3.5},{Output,-0.5}},
+                      "", preNolly),
+        factoryPreset("Pre-Amp", "Open Pick Push",
+                      "A more open boost that emphasizes the hand and attack instead of aggressively filtering the low end.",
+                      {{Gate,1.3},{Tight,3.2},{Punch,4.2},{Body,2.5},{Drive,2.8},{Bite,1.8},{Attack,4.5},{Output,-0.5}},
+                      "", preNolly),
+        factoryPreset("Pre-Amp", "Warm Saturation Push",
+                      "Feeds the amp a rounded, harmonically dense signal for thick riffs and less clinical sustain.",
+                      {{Tight,2.5},{Punch,2.0},{Body,3.2},{Mass,2.2},{Growl,2.0},{Drive,3.5},{Smooth,2.5},{Output,-1.0}},
+                      "", preNolly),
+        factoryPreset("Pre-Amp", "Controlled Fuzz Feed",
+                      "A restrained fuzz layer before the amp: audible texture, but still playable and responsive.",
+                      {{Gate,2.0},{Tight,4.0},{Body,2.0},{Drive,1.5},{Fuzz,3.8},{Smooth,1.8},{Attack,2.0},{Output,-1.5}},
+                      "", preNolly),
+
+        // PRE-AMP: album / artist inspired front-end shaping.
+        factoryPreset("Pre-Amp", "156/Silence - People Watching",
+                      "Bouncy, pummelling and slightly chaotic front-end shaping with a hard rhythmic center.",
+                      {{Gate,3.5},{Tight,6.5},{Punch,5.0},{Body,1.5},{Mass,1.2},{Growl,2.4},{Drive,2.4},{Grind,2.8},{Bite,1.8},{Attack,4.0},{Compression,0.5},{Output,-0.7}},
+                      "156/Silence - People Watching", preNolly),
+        factoryPreset("Pre-Amp", "ERRA - CURE",
+                      "Groove-first tightening with strong right-hand definition and controlled low-mid pressure.",
+                      {{Gate,2.8},{Tight,6.2},{Punch,5.2},{Body,2.0},{Mass,1.5},{Drive,2.0},{Grind,1.7},{Bite,1.5},{Dynamics,1.5},{Attack,4.3},{Output,-0.4}},
+                      "ERRA - CURE", preNolly),
+        factoryPreset("Pre-Amp", "thrown - EXCESSIVE GUILT",
+                      "Chunky, metallic and industrial: a tight modern hardcore feed with serrated upper-mid attack.",
+                      {{Gate,5.0},{Tight,7.2},{Punch,5.6},{Body,1.3},{Mass,1.0},{Growl,1.8},{Drive,2.8},{Grind,4.2},{Bite,3.2},{Texture,1.5},{Smooth,1.0},{Attack,3.8},{Output,-1.2}},
+                      "thrown - EXCESSIVE GUILT", preNolly),
+        factoryPreset("Pre-Amp", "HLB - Abyssal Weight",
+                      "Ultra-low, dense and punishing pre-shaping inspired by Humanity's Last Breath, with clarity preserved above the sub range.",
+                      {{Gate,4.5},{Tight,8.7},{Punch,6.0},{Body,1.8},{Mass,2.8},{Growl,3.5},{Drive,2.8},{Grind,3.5},{Bite,1.2},{Smooth,2.0},{Attack,3.0},{Output,-1.3}},
+                      "Humanity's Last Breath", preNolly),
+        factoryPreset("Pre-Amp", "Sleep Token - Take Me Back to Eden",
+                      "Thick and rounded djent pressure with a softer edge, intended to leave room for atmospheric layers.",
+                      {{Gate,2.2},{Tight,5.0},{Punch,4.3},{Body,3.0},{Mass,2.8},{Growl,1.8},{Drive,2.6},{Grind,1.0},{Smooth,2.8},{Attack,2.3},{Output,-0.8}},
+                      "Sleep Token - Take Me Back to Eden", preNolly),
+
+        // POST-AMP: general-purpose finishing presets.
+        factoryPreset("Post-Amp", "Finished Rhythm",
+                      "A controlled final polish for an already good rhythm tone: density, edge and transient clarity.",
+                      {{AutoGain,1.0},{Tight,1.5},{Punch,2.0},{Body,2.0},{Drive,2.6},{Grind,1.4},{Bite,2.8},{Presence,2.0},{Smooth,2.0},{Compression,1.5},{Attack,2.0},{ParallelDry,7.0}},
+                      "", postNolly),
+        factoryPreset("Post-Amp", "Dense but Clear",
+                      "Adds sustain and low-mid density while keeping chord detail and a clean transient outline.",
+                      {{AutoGain,1.0},{Tight,1.8},{Punch,3.0},{Body,3.2},{Mass,2.2},{Drive,3.2},{Grind,1.8},{Presence,2.4},{Smooth,1.7},{Compression,2.6},{ParallelDry,7.0},{Output,-0.5}},
+                      "", postNolly),
+        factoryPreset("Post-Amp", "Air and Bite",
+                      "Brighter finished tone with extra articulation, top-end openness and restrained smoothing.",
+                      {{AutoGain,1.0},{Drive,1.8},{Bite,4.5},{Presence,3.8},{Air,4.0},{Smooth,2.0},{Attack,2.5},{ParallelDry,10.0},{Output,-0.4}},
+                      "", postNolly),
+        factoryPreset("Post-Amp", "Low-Mid Weight",
+                      "Adds physical weight and low-mid impact after the cabinet without relying on loose sub bass.",
+                      {{AutoGain,1.0},{Punch,3.0},{Body,4.0},{Mass,3.5},{Growl,2.0},{Drive,1.8},{Resonance,2.0},{Smooth,2.2},{Output,-0.5}},
+                      "", postNolly),
+        factoryPreset("Post-Amp", "Smooth Wall",
+                      "A broad, softened wall of sound with breathing sustain and less abrasive high-frequency texture.",
+                      {{AutoGain,1.0},{Body,3.0},{Mass,2.0},{Growl,2.5},{Drive,3.0},{Bloom,3.0},{Sag,2.0},{Compression,3.5},{Texture,2.0},{Smooth,4.0},{Air,1.0},{Output,-0.8}},
+                      "", postNolly),
+
+        // POST-AMP: album / artist inspired finishing.
+        factoryPreset("Post-Amp", "Thornhill - BODIES",
+                      "Dreamy depth, distorted low-mid motion and sharp heavy/soft contrast without losing the rhythmic pulse.",
+                      {{AutoGain,1.0},{Punch,2.0},{Body,3.8},{Mass,2.2},{Growl,2.3},{Drive,2.6},{Fuzz,0.8},{Bloom,3.4},{Sag,2.2},{Compression,2.4},{Texture,3.2},{Smooth,4.0},{Presence,1.8},{Air,2.4},{ParallelDry,7.0}},
+                      "Thornhill - BODIES", postNolly),
+        factoryPreset("Post-Amp", "ERRA - silence outlives the earth",
+                      "Slick technical definition, spiky articulation and a polished modern midrange for rapid riff changes.",
+                      {{AutoGain,1.0},{Tight,2.0},{Punch,2.5},{Body,1.6},{Growl,1.8},{Drive,2.3},{Grind,2.3},{Bite,3.5},{Presence,3.0},{Air,2.5},{Smooth,1.5},{Dynamics,2.0},{Attack,3.3},{ParallelDry,8.0}},
+                      "ERRA - silence outlives the earth", postNolly),
+        factoryPreset("Post-Amp", "Loathe - A Stranger to You",
+                      "Warm baritone mass and digital-maximalist texture, balancing crushing density with a hazy melodic surface.",
+                      {{AutoGain,1.0},{Punch,2.8},{Body,4.2},{Mass,3.2},{Growl,3.0},{Drive,3.0},{Grind,2.4},{Fuzz,0.8},{Bloom,3.2},{Compression,3.5},{Texture,4.2},{Smooth,4.4},{Air,1.8},{ParallelDry,5.0},{Output,-0.5}},
+                      "Loathe - A Stranger to You", postNolly),
+        factoryPreset("Post-Amp", "Spiritbox - Tsunami Sea",
+                      "Refined crushing weight, technical precision and a compressed atmospheric sheen.",
+                      {{AutoGain,1.0},{Tight,2.0},{Punch,3.2},{Body,2.8},{Mass,2.0},{Growl,2.0},{Drive,2.4},{Grind,2.1},{Bite,2.8},{Presence,2.5},{Air,3.0},{Smooth,3.0},{Bloom,2.8},{Dynamics,2.5},{Compression,4.8},{Attack,2.5},{ParallelDry,8.0}},
+                      "Spiritbox - Tsunami Sea", postNolly),
+        factoryPreset("Post-Amp", "Deftones - private music",
+                      "Thick sustained chords, polished punch and a soft-focus haze around a heavy, menacing core.",
+                      {{AutoGain,1.0},{Punch,2.0},{Body,4.5},{Mass,3.5},{Growl,2.2},{Drive,3.4},{Grind,1.0},{Bloom,3.6},{Sag,2.8},{Compression,2.8},{Texture,2.0},{Smooth,4.8},{Air,2.8},{ParallelDry,10.0},{Output,-0.5}},
+                      "Deftones - private music", postNolly),
+
+        // CREATIVE: intentionally less conventional combinations.
+        factoryPreset("Creative", "Living Fuzz",
+                      "A moving fuzz texture with useful note shape instead of pure noise.",
+                      {{Drive,3.2},{Fuzz,7.0},{Growl,2.8},{HarmonicBias,3.6},{Bloom,2.6},{Dynamics,2.4},{Texture,4.0},{Smooth,2.8},{Attack,1.8},{Output,-2.2}}),
+        factoryPreset("Creative", "Crushed Bloom",
+                      "Destroyed sustain with audible motion and deliberately excessive compression.",
+                      {{Drive,7.4},{Grind,5.2},{Fuzz,3.6},{Bloom,7.0},{Sag,5.0},{Compression,7.2},{Dynamics,4.2},{Texture,4.4},{Smooth,3.8},{Output,-3.0}}),
+        factoryPreset("Creative", "Glass Teeth",
+                      "Bright, cutting articulation that stays controlled at the top.",
                       {{Drive,4.2},{Grind,3.8},{Bite,6.0},{Presence,5.2},{Air,3.4},{Smooth,2.5},{Attack,4.4},{ParallelDry,10.0},{Output,-1.5}}),
-        factoryPreset("Living Fuzz", "A moving fuzz texture with useful note shape instead of pure noise.",
-                      {{Drive,3.2},{Fuzz,7.0},{Growl,2.8},{HarmonicBias,3.6},{Bloom,2.6},{Dynamics,2.4},{Texture,4.0},{Smooth,2.8},{Attack,1.8},{Output,-2.2}})
+        factoryPreset("Creative", "Synth Growl",
+                      "Harmonic movement for basses, drones and monophonic synthesizers.",
+                      {{Body,3.2},{Mass,4.0},{Growl,7.0},{Drive,5.2},{Grind,2.7},{HarmonicBias,4.5},{Bloom,2.8},{Dynamics,3.0},{Texture,3.8},{Smooth,2.2},{Output,-2.0}}),
+        factoryPreset("Creative", "Parallel Attack",
+                      "Dense wet body with a clean transient edge mixed back in parallel.",
+                      {{Tight,3.0},{Punch,3.8},{Drive,6.2},{Growl,2.6},{Compression,4.0},{Attack,4.2},{ParallelDry,22.0},{Presence,2.4},{Output,-1.2}}),
+        factoryPreset("Creative", "Velvet Violence",
+                      "Heavy saturation with softened edges and a breathing tail.",
+                      {{Drive,7.0},{Growl,3.6},{Fuzz,1.8},{Bloom,3.8},{Sag,3.4},{Compression,4.6},{Smooth,4.2},{Texture,2.5},{Air,1.2},{Output,-2.4}}),
+        factoryPreset("Creative", "Color x2",
+                      "A deliberately exaggerated character stack using x2 COLOR without changing Drive itself.",
+                      {{X2,1.0},{Growl,4.0},{Grind,3.0},{Fuzz,2.0},{Bloom,2.5},{Sag,2.5},{Texture,2.8},{HarmonicBias,2.8},{Smooth,2.0},{Output,-2.0}})
     };
 }
 
@@ -278,6 +366,7 @@ Preset PresetManager::captureCurrentPreset(const std::filesystem::path& path, co
     preset.name = name.empty() ? path.stem().string() : name;
     preset.author = "User";
     preset.description = "User preset";
+    preset.category = "User";
     preset.factory = false;
     preset.path = path;
     for (size_t i = 0; i < kParamCount; ++i) preset.values[i] = parameters_.values[i].load();
@@ -434,6 +523,21 @@ std::string PresetManager::currentDescription() const {
     return currentIndex_ < presets_.size() ? presets_[currentIndex_].description : std::string{};
 }
 
+std::string PresetManager::currentCategory() const {
+    std::lock_guard lock(mutex_);
+    return currentIndex_ < presets_.size() ? presets_[currentIndex_].category : std::string{};
+}
+
+std::string PresetManager::currentInspiredBy() const {
+    std::lock_guard lock(mutex_);
+    return currentIndex_ < presets_.size() ? presets_[currentIndex_].inspiredBy : std::string{};
+}
+
+std::string PresetManager::currentReferenceChain() const {
+    std::lock_guard lock(mutex_);
+    return currentIndex_ < presets_.size() ? presets_[currentIndex_].referenceChain : std::string{};
+}
+
 std::filesystem::path PresetManager::currentPath() const {
     std::lock_guard lock(mutex_);
     return currentIndex_ < presets_.size() ? presets_[currentIndex_].path : std::filesystem::path{};
@@ -459,6 +563,15 @@ std::vector<std::string> PresetManager::presetNames() const {
     names.reserve(presets_.size());
     for (const auto& preset : presets_) names.push_back(preset.name);
     return names;
+}
+
+std::vector<PresetInfo> PresetManager::presetInfos() const {
+    std::lock_guard lock(mutex_);
+    std::vector<PresetInfo> infos;
+    infos.reserve(presets_.size());
+    for (size_t i = 0; i < presets_.size(); ++i)
+        infos.push_back(PresetInfo{i, presets_[i].name, presets_[i].category, presets_[i].factory});
+    return infos;
 }
 
 void PresetManager::markDirty() {
@@ -499,10 +612,13 @@ std::string PresetManager::serializePreset(const Preset& preset) {
     std::ostringstream stream;
     stream << "{\n"
            << "  \"format\": \"GrowlForgePreset\",\n"
-           << "  \"version\": 2,\n"
+           << "  \"version\": 3,\n"
            << "  \"name\": \"" << escapeJson(preset.name) << "\",\n"
            << "  \"author\": \"" << escapeJson(preset.author) << "\",\n"
            << "  \"description\": \"" << escapeJson(preset.description) << "\",\n"
+           << "  \"category\": \"" << escapeJson(preset.category) << "\",\n"
+           << "  \"inspiredBy\": \"" << escapeJson(preset.inspiredBy) << "\",\n"
+           << "  \"referenceChain\": \"" << escapeJson(preset.referenceChain) << "\",\n"
            << "  \"parameters\": {\n";
     bool first = true;
     stream << std::fixed << std::setprecision(4);
@@ -522,6 +638,10 @@ bool PresetManager::parsePreset(const std::string& text, Preset& preset) {
     preset.name = parseStringField(text, "name");
     preset.author = parseStringField(text, "author");
     preset.description = parseStringField(text, "description");
+    preset.category = parseStringField(text, "category");
+    preset.inspiredBy = parseStringField(text, "inspiredBy");
+    preset.referenceChain = parseStringField(text, "referenceChain");
+    if (preset.category.empty()) preset.category = "User";
     for (clap_id id = 0; id < kParamCount; ++id) {
         if (!isPresetParameter(id)) continue;
         double value = 0.0;
