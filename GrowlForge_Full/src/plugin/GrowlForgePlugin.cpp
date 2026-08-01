@@ -12,7 +12,7 @@
 namespace growlforge {
 
 GrowlForge::GrowlForge(const clap_host_t* hostIn)
-    : host(hostIn), parameters(hostIn), dsp(parameters), presets(parameters) {
+    : host(hostIn), parameters(hostIn), dsp(parameters), workflow(parameters), presets(parameters) {
     meters.reset();
 }
 
@@ -331,8 +331,8 @@ const clap_plugin_descriptor_t descriptor{
     "GrowlForge",
     "OpenAI / User Project",
     "", "", "",
-    "2.1.0",
-    "Post-amp guitar character processor with Auto-Gain 2.0, click-free bypass, linked gate, enhanced metering and presets.",
+    "2.2.0",
+    "Personal guitar character processor with A/B comparison, Undo/Redo and protected user presets.",
     features
 };
 

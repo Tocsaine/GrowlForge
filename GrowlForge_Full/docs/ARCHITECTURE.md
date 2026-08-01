@@ -1,6 +1,6 @@
-# GrowlForge architecture — 2.1.0
+# GrowlForge architecture — 2.2.0
 
-GrowlForge 2.1 keeps the modular host/parameter/DSP/state/GUI split introduced by the 2.1 development refactor and uses it for the first complete feature release.
+GrowlForge 2.2 keeps the modular host/parameter/DSP/state/GUI split introduced by the 2.1 development refactor and uses it for the first complete feature release.
 
 ## Source tree
 
@@ -25,7 +25,8 @@ src/
 │   └── PluginFactory.h
 ├── state/
 │   ├── StateManager.h/.cpp
-│   └── PresetManager.h/.cpp
+│   ├── PresetManager.h/.cpp
+│   └── WorkflowManager.h/.cpp
 └── gui/
     └── GrowlForgeGUI.h/.cpp
 ```
@@ -71,22 +72,28 @@ GUI animation is derived from this snapshot and never runs in the audio thread.
 
 Project state and user presets are intentionally separate.
 
-- Project state format is version 11.
-- State versions 7, 8, 9, and 10 remain loadable.
-- Project state includes Bypass and the current preset name.
+- Project state format is version 12.
+- State versions 7, 8, 9, 10, and 11 remain loadable.
+- Project state includes Bypass, the current preset name, both A/B snapshots, and the active slot.
 - User `.gfpreset` files use stable textual parameter keys.
 - Bypass, momentary actions, meters, and the temporary Auto-Gain correction are excluded from presets.
 
+### `WorkflowManager`
+
+`WorkflowManager` owns two sound snapshots, the active A/B slot, and a bounded 64-step Undo/Redo history. It only stores preset-eligible sound parameters, so Bypass and transient meter/action state do not leak into comparison slots. Snapshot application uses the existing GUI-to-host parameter queue.
+
 ### `gui/`
 
-The optimized cached GDI+ renderer remains in place. Version 2.1 adds:
+The optimized cached GDI+ renderer remains in place. Version 2.2 adds:
 
 - Bypass button and BYPASSED status;
 - preset previous/next, browser, Load, and Save controls;
 - RMS fill, peak trace, and peak-hold markers;
 - internal clipping warning;
 - live Gate-reduction activity;
-- current preset name and dirty-state marker.
+- current preset name and dirty-state marker;
+- A/B, copy, Undo, and Redo controls in the lower workflow strip;
+- protected preset replacement and preset file management commands.
 
 ## Preserved contracts
 
@@ -95,4 +102,4 @@ The optimized cached GDI+ renderer remains in place. Version 2.1 adds:
 - Drive remains excluded from `×2`
 - Drive DC/subsonic fix from 2.0.3: retained
 - Untouched DSP scenarios remain bit-identical to 2.0.3
-- State migration: versions 7–11
+- State migration: versions 7–12

@@ -1,19 +1,21 @@
-# GrowlForge 2.1.0
+# GrowlForge 2.2.0
 
-GrowlForge 2.1 adds the first complete workflow layer around the existing distortion engine without adding more sound-shaping knobs.
+GrowlForge 2.2 focuses on fast personal workflow without changing the DSP character introduced in 2.1.
 
 ## Main changes
 
-- Auto-Gain 2.0 with stereo-linked, perceptually weighted measurement and silence hold.
-- Click-free Bypass that keeps the wet path and Auto-Gain active in the background.
-- Stereo-linked Gate with hysteresis, hold, and smooth opening/closing.
-- Peak, RMS, peak-hold, Gate-reduction, and internal-clipping feedback.
-- Project-state format 11 with migration from versions 7–10.
-- Ten factory presets plus user `.gfpreset` Load/Save, previous/next, and popup browser.
+- two persistent A/B sound slots;
+- Copy A→B and B→A;
+- 64-step snapshot Undo/Redo for GUI edits and preset loads;
+- smart Save, Save As, Rename, Delete, Refresh, and Open Preset Folder commands;
+- Save / Discard / Cancel protection before replacing a modified preset;
+- six new personal starter presets, for a total factory bank of sixteen;
+- project-state format 12, preserving A/B slots and the active slot;
+- state versions 7–11 remain loadable.
 
-The plugin ID and parameter IDs 0–35 are unchanged. Bypass is appended as ID 36. Drive remains excluded from `×2`.
+The DSP, plugin ID, parameter IDs, Auto-Gain 2.0, Gate, Bypass, meters, and Drive behavior are unchanged from 2.1.0.
 
-See `RELEASE_2.1.0.md`, `docs/ARCHITECTURE.md`, and `docs/PRESETS.md`.
+See `RELEASE_2.2.0.md`, `docs/ARCHITECTURE.md`, and `docs/PRESETS.md`.
 
 ## Build
 

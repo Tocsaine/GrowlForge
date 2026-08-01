@@ -4,6 +4,7 @@
 #include "../parameters/ParameterStore.h"
 #include "../dsp/GrowlForgeDSP.h"
 #include "../state/PresetManager.h"
+#include "../state/WorkflowManager.h"
 #include <array>
 #include <atomic>
 
@@ -35,14 +36,15 @@ struct GrowlForge {
     const clap_host_params_t* hostParams = nullptr;
     ParameterStore parameters;
     GrowlForgeDSP dsp;
+    WorkflowManager workflow;
     PresetManager presets;
     MeteringData meters;
     void* guiState = nullptr;
 
     explicit GrowlForge(const clap_host_t* host);
 
-    void beginGuiGesture(clap_id id) { parameters.beginGuiGesture(id); }
-    void endGuiGesture(clap_id id) { parameters.endGuiGesture(id); }
+    void beginGuiGesture(clap_id id) { workflow.beginAction(); parameters.beginGuiGesture(id); }
+    void endGuiGesture(clap_id id) { parameters.endGuiGesture(id); workflow.commitAction(); }
     void setGuiParameter(clap_id id, double value) {
         parameters.setGuiParameter(id, value);
         if (isPresetParameter(id)) presets.markDirty();

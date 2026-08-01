@@ -2,6 +2,7 @@
 #include "../common/Math.h"
 #include <algorithm>
 #include <cstdlib>
+#include <cstddef>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -69,6 +70,11 @@ bool parseNumberField(const std::string& text, const std::string& key, double& v
     return true;
 }
 
+std::filesystem::path ensurePresetExtension(std::filesystem::path path) {
+    if (path.extension() != ".gfpreset") path.replace_extension(".gfpreset");
+    return path;
+}
+
 } // namespace
 
 PresetManager::PresetManager(ParameterStore& parameters) : parameters_(parameters) {
@@ -101,7 +107,21 @@ std::vector<Preset> PresetManager::makeFactoryPresets() {
         factoryPreset("Wide Open", "Open, bright distortion with restrained smoothing.",
                       {{Drive,5.8},{Growl,2.0},{Bite,3.8},{Presence,3.5},{Air,4.5},{Texture,1.8},{Attack,2.0},{Output,-1.0}}),
         factoryPreset("Color x2", "A deliberately exaggerated character preset.",
-                      {{X2,1.0},{Growl,4.0},{Grind,3.0},{Fuzz,2.0},{Bloom,2.5},{Sag,2.5},{Texture,2.8},{HarmonicBias,2.8},{Smooth,2.0},{Output,-2.0}})
+                      {{X2,1.0},{Growl,4.0},{Grind,3.0},{Fuzz,2.0},{Bloom,2.5},{Sag,2.5},{Texture,2.8},{HarmonicBias,2.8},{Smooth,2.0},{Output,-2.0}}),
+
+        // Personal starter bank for quick experimentation.
+        factoryPreset("Tactile Crunch", "Responsive medium drive that keeps the pick close to the fingers.",
+                      {{Drive,4.8},{Punch,2.8},{Body,2.3},{Growl,1.7},{Bite,2.0},{Attack,2.6},{Compression,0.8},{Output,-0.7}}),
+        factoryPreset("Dense but Clear", "More density and sustain without burying chord detail.",
+                      {{Tight,3.4},{Punch,3.0},{Body,3.2},{Mass,2.2},{Drive,6.0},{Grind,1.8},{Presence,2.4},{Smooth,1.7},{Compression,2.6},{ParallelDry,7.0},{Output,-1.3}}),
+        factoryPreset("Low String Clamp", "Firm low-string control for fast riffs and hard palm mutes.",
+                      {{Gate,3.8},{Tight,7.1},{Punch,5.6},{Mass,3.2},{Drive,5.4},{Grind,2.8},{Resonance,2.0},{Attack,3.5},{Output,-1.2}}),
+        factoryPreset("Velvet Violence", "Heavy saturation with softened edges and a breathing tail.",
+                      {{Drive,7.0},{Growl,3.6},{Fuzz,1.8},{Bloom,3.8},{Sag,3.4},{Compression,4.6},{Smooth,4.2},{Texture,2.5},{Air,1.2},{Output,-2.4}}),
+        factoryPreset("Glass Teeth", "Bright, cutting articulation that stays controlled at the top.",
+                      {{Drive,4.2},{Grind,3.8},{Bite,6.0},{Presence,5.2},{Air,3.4},{Smooth,2.5},{Attack,4.4},{ParallelDry,10.0},{Output,-1.5}}),
+        factoryPreset("Living Fuzz", "A moving fuzz texture with useful note shape instead of pure noise.",
+                      {{Drive,3.2},{Fuzz,7.0},{Growl,2.8},{HarmonicBias,3.6},{Bloom,2.6},{Dynamics,2.4},{Texture,4.0},{Smooth,2.8},{Attack,1.8},{Output,-2.2}})
     };
 }
 
@@ -117,10 +137,25 @@ std::filesystem::path PresetManager::userPresetDirectory() const {
     return std::filesystem::temp_directory_path() / "GrowlForge" / "Presets";
 }
 
+bool PresetManager::samePath(const std::filesystem::path& a, const std::filesystem::path& b) {
+    if (a.empty() || b.empty()) return false;
+    std::error_code errorA, errorB;
+    const auto ca = std::filesystem::weakly_canonical(a, errorA);
+    const auto cb = std::filesystem::weakly_canonical(b, errorB);
+    if (!errorA && !errorB) return ca == cb;
+    return a.lexically_normal() == b.lexically_normal();
+}
+
 void PresetManager::refresh() {
-    std::lock_guard lock(mutex_);
-    std::string preserveName = currentName_;
-    presets_ = makeFactoryPresets();
+    std::string preserveName;
+    std::filesystem::path preservePath;
+    {
+        std::lock_guard lock(mutex_);
+        preserveName = currentName_;
+        if (currentIndex_ < presets_.size()) preservePath = presets_[currentIndex_].path;
+    }
+
+    std::vector<Preset> refreshed = makeFactoryPresets();
     const auto directory = userPresetDirectory();
     std::error_code error;
     std::filesystem::create_directories(directory, error);
@@ -137,16 +172,27 @@ void PresetManager::refresh() {
                 preset.factory = false;
                 preset.path = path;
                 if (preset.name.empty()) preset.name = path.stem().string();
-                presets_.push_back(std::move(preset));
+                refreshed.push_back(std::move(preset));
             }
         }
     }
+
+    std::lock_guard lock(mutex_);
+    presets_ = std::move(refreshed);
     currentIndex_ = 0;
     for (size_t i = 0; i < presets_.size(); ++i) {
-        if (presets_[i].name == preserveName) {
+        if ((!preservePath.empty() && samePath(presets_[i].path, preservePath)) ||
+            (preservePath.empty() && presets_[i].name == preserveName)) {
             currentIndex_ = i;
-            break;
+            currentName_ = presets_[i].name;
+            return;
         }
+    }
+    if (!preservePath.empty()) {
+        currentName_ = "Unsaved";
+        dirty_ = true;
+    } else if (!presets_.empty()) {
+        currentName_ = presets_[0].name;
     }
 }
 
@@ -168,8 +214,6 @@ bool PresetManager::applyPreset(const Preset& preset, size_t index) {
         currentName_ = preset.name;
         dirty_ = false;
     }
-    // Request the host callback only after releasing the preset mutex. Some
-    // hosts may flush synchronously and echo parameter events immediately.
     parameters_.requestParamFlush();
     return true;
 }
@@ -185,65 +229,193 @@ bool PresetManager::selectIndex(size_t index) {
 }
 
 bool PresetManager::selectPrevious() {
-    Preset preset;
     size_t index = 0;
     {
         std::lock_guard lock(mutex_);
         if (presets_.empty()) return false;
         index = currentIndex_ == 0 ? presets_.size() - 1 : currentIndex_ - 1;
-        preset = presets_[index];
     }
-    return applyPreset(preset, index);
+    return selectIndex(index);
 }
 
 bool PresetManager::selectNext() {
-    Preset preset;
     size_t index = 0;
     {
         std::lock_guard lock(mutex_);
         if (presets_.empty()) return false;
         index = (currentIndex_ + 1) % presets_.size();
-        preset = presets_[index];
     }
-    return applyPreset(preset, index);
+    return selectIndex(index);
 }
 
-bool PresetManager::loadFile(const std::filesystem::path& path) {
+bool PresetManager::loadFile(const std::filesystem::path& inputPath) {
+    const auto path = ensurePresetExtension(inputPath);
     Preset preset;
     if (!parsePreset(readTextFile(path), preset)) return false;
     preset.factory = false;
     preset.path = path;
     if (preset.name.empty()) preset.name = path.stem().string();
+
     size_t index = 0;
     {
         std::lock_guard lock(mutex_);
-        presets_.push_back(preset);
-        index = presets_.size() - 1;
+        auto it = std::find_if(presets_.begin(), presets_.end(), [&](const Preset& item) {
+            return !item.factory && samePath(item.path, path);
+        });
+        if (it == presets_.end()) {
+            presets_.push_back(preset);
+            index = presets_.size() - 1;
+        } else {
+            *it = preset;
+            index = static_cast<size_t>(std::distance(presets_.begin(), it));
+        }
     }
     return applyPreset(preset, index);
 }
 
-bool PresetManager::saveFile(const std::filesystem::path& path, const std::string& requestedName) {
+Preset PresetManager::captureCurrentPreset(const std::filesystem::path& path, const std::string& name) const {
     Preset preset;
-    preset.name = requestedName.empty() ? path.stem().string() : requestedName;
+    preset.name = name.empty() ? path.stem().string() : name;
     preset.author = "User";
     preset.description = "User preset";
     preset.factory = false;
     preset.path = path;
     for (size_t i = 0; i < kParamCount; ++i) preset.values[i] = parameters_.values[i].load();
+    return preset;
+}
 
+bool PresetManager::writePresetFile(const std::filesystem::path& inputPath, const Preset& preset) const {
+    const auto path = ensurePresetExtension(inputPath);
     std::error_code error;
     std::filesystem::create_directories(path.parent_path(), error);
-    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
-    if (!stream) return false;
-    stream << serializePreset(preset);
-    if (!stream.good()) return false;
+    if (error) return false;
+
+    std::filesystem::path temporary = path;
+    temporary += ".tmp";
+    std::filesystem::path backup = path;
+    backup += ".bak";
+    std::filesystem::remove(temporary, error);
+    error.clear();
+    {
+        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+        if (!stream) return false;
+        stream << serializePreset(preset);
+        if (!stream.good()) {
+            stream.close();
+            std::filesystem::remove(temporary, error);
+            return false;
+        }
+    }
+
+    const bool hadOriginal = std::filesystem::exists(path);
+    if (hadOriginal) {
+        std::filesystem::remove(backup, error);
+        error.clear();
+        std::filesystem::rename(path, backup, error);
+        if (error) {
+            std::filesystem::remove(temporary, error);
+            return false;
+        }
+    }
+
+    error.clear();
+    std::filesystem::rename(temporary, path, error);
+    if (error) {
+        if (hadOriginal) {
+            std::error_code restoreError;
+            std::filesystem::rename(backup, path, restoreError);
+        }
+        std::filesystem::remove(temporary, error);
+        return false;
+    }
+    if (hadOriginal) std::filesystem::remove(backup, error);
+    return true;
+}
+
+bool PresetManager::saveFile(const std::filesystem::path& inputPath, const std::string& requestedName) {
+    const auto path = ensurePresetExtension(inputPath);
+    Preset preset = captureCurrentPreset(path, requestedName.empty() ? path.stem().string() : requestedName);
+    if (!writePresetFile(path, preset)) return false;
 
     std::lock_guard lock(mutex_);
-    presets_.push_back(preset);
-    currentIndex_ = presets_.size() - 1;
+    auto it = std::find_if(presets_.begin(), presets_.end(), [&](const Preset& item) {
+        return !item.factory && samePath(item.path, path);
+    });
+    if (it == presets_.end()) {
+        presets_.push_back(preset);
+        currentIndex_ = presets_.size() - 1;
+    } else {
+        *it = preset;
+        currentIndex_ = static_cast<size_t>(std::distance(presets_.begin(), it));
+    }
     currentName_ = preset.name;
     dirty_ = false;
+    return true;
+}
+
+bool PresetManager::saveCurrent() {
+    std::filesystem::path path;
+    std::string name;
+    {
+        std::lock_guard lock(mutex_);
+        if (currentIndex_ >= presets_.size() || presets_[currentIndex_].factory || presets_[currentIndex_].path.empty()) return false;
+        path = presets_[currentIndex_].path;
+        name = presets_[currentIndex_].name;
+    }
+    return saveFile(path, name);
+}
+
+bool PresetManager::renameCurrent(const std::filesystem::path& inputPath, const std::string& requestedName) {
+    const auto newPath = ensurePresetExtension(inputPath);
+    std::filesystem::path oldPath;
+    size_t oldIndex = 0;
+    {
+        std::lock_guard lock(mutex_);
+        if (currentIndex_ >= presets_.size() || presets_[currentIndex_].factory || presets_[currentIndex_].path.empty()) return false;
+        oldIndex = currentIndex_;
+        oldPath = presets_[currentIndex_].path;
+    }
+    if (!samePath(oldPath, newPath) && std::filesystem::exists(newPath)) return false;
+
+    const std::string newName = requestedName.empty() ? newPath.stem().string() : requestedName;
+    Preset renamed = captureCurrentPreset(newPath, newName);
+    if (!writePresetFile(newPath, renamed)) return false;
+
+    std::error_code error;
+    if (!samePath(oldPath, newPath)) std::filesystem::remove(oldPath, error);
+
+    std::lock_guard lock(mutex_);
+    if (oldIndex >= presets_.size()) return false;
+    presets_[oldIndex] = renamed;
+    for (size_t i = presets_.size(); i-- > 0;) {
+        if (i != oldIndex && !presets_[i].factory && samePath(presets_[i].path, newPath)) {
+            presets_.erase(presets_.begin() + static_cast<std::ptrdiff_t>(i));
+            if (i < oldIndex) --oldIndex;
+        }
+    }
+    currentIndex_ = oldIndex;
+    currentName_ = renamed.name;
+    dirty_ = false;
+    return true;
+}
+
+bool PresetManager::deleteCurrent() {
+    std::filesystem::path path;
+    size_t index = 0;
+    {
+        std::lock_guard lock(mutex_);
+        if (currentIndex_ >= presets_.size() || presets_[currentIndex_].factory || presets_[currentIndex_].path.empty()) return false;
+        index = currentIndex_;
+        path = presets_[currentIndex_].path;
+    }
+    std::error_code error;
+    if (!std::filesystem::remove(path, error) && error) return false;
+
+    std::lock_guard lock(mutex_);
+    if (index < presets_.size()) presets_.erase(presets_.begin() + static_cast<std::ptrdiff_t>(index));
+    currentIndex_ = 0;
+    currentName_ = "Unsaved";
+    dirty_ = true;
     return true;
 }
 
@@ -252,9 +424,35 @@ std::string PresetManager::currentName() const {
     return currentName_ + (dirty_ ? " *" : "");
 }
 
+std::string PresetManager::currentCleanName() const {
+    std::lock_guard lock(mutex_);
+    return currentName_;
+}
+
+std::string PresetManager::currentDescription() const {
+    std::lock_guard lock(mutex_);
+    return currentIndex_ < presets_.size() ? presets_[currentIndex_].description : std::string{};
+}
+
+std::filesystem::path PresetManager::currentPath() const {
+    std::lock_guard lock(mutex_);
+    return currentIndex_ < presets_.size() ? presets_[currentIndex_].path : std::filesystem::path{};
+}
+
+bool PresetManager::currentIsFactory() const {
+    std::lock_guard lock(mutex_);
+    return currentIndex_ < presets_.size() && presets_[currentIndex_].factory;
+}
+
+bool PresetManager::currentIsUser() const {
+    std::lock_guard lock(mutex_);
+    return currentIndex_ < presets_.size() && !presets_[currentIndex_].factory && !presets_[currentIndex_].path.empty();
+}
+
 bool PresetManager::isDirty() const { std::lock_guard lock(mutex_); return dirty_; }
 size_t PresetManager::presetCount() const { std::lock_guard lock(mutex_); return presets_.size(); }
 size_t PresetManager::currentIndex() const { std::lock_guard lock(mutex_); return currentIndex_; }
+
 std::vector<std::string> PresetManager::presetNames() const {
     std::lock_guard lock(mutex_);
     std::vector<std::string> names;
@@ -262,7 +460,11 @@ std::vector<std::string> PresetManager::presetNames() const {
     for (const auto& preset : presets_) names.push_back(preset.name);
     return names;
 }
-void PresetManager::markDirty() { std::lock_guard lock(mutex_); dirty_ = true; }
+
+void PresetManager::markDirty() {
+    std::lock_guard lock(mutex_);
+    dirty_ = true;
+}
 
 void PresetManager::setCurrentNameFromState(const std::string& name) {
     std::lock_guard lock(mutex_);
@@ -270,7 +472,10 @@ void PresetManager::setCurrentNameFromState(const std::string& name) {
     dirty_ = false;
     currentIndex_ = 0;
     for (size_t i = 0; i < presets_.size(); ++i) {
-        if (presets_[i].name == currentName_) { currentIndex_ = i; break; }
+        if (presets_[i].name == currentName_) {
+            currentIndex_ = i;
+            break;
+        }
     }
 }
 
@@ -294,7 +499,7 @@ std::string PresetManager::serializePreset(const Preset& preset) {
     std::ostringstream stream;
     stream << "{\n"
            << "  \"format\": \"GrowlForgePreset\",\n"
-           << "  \"version\": 1,\n"
+           << "  \"version\": 2,\n"
            << "  \"name\": \"" << escapeJson(preset.name) << "\",\n"
            << "  \"author\": \"" << escapeJson(preset.author) << "\",\n"
            << "  \"description\": \"" << escapeJson(preset.description) << "\",\n"

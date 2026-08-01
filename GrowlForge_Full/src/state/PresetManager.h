@@ -27,10 +27,19 @@ public:
     bool selectNext();
     bool selectIndex(size_t index);
     bool loadFile(const std::filesystem::path& path);
+
     bool saveFile(const std::filesystem::path& path, const std::string& requestedName = {});
+    bool saveCurrent();
+    bool renameCurrent(const std::filesystem::path& newPath, const std::string& requestedName = {});
+    bool deleteCurrent();
 
     std::filesystem::path userPresetDirectory() const;
     std::string currentName() const;
+    std::string currentCleanName() const;
+    std::string currentDescription() const;
+    std::filesystem::path currentPath() const;
+    bool currentIsFactory() const;
+    bool currentIsUser() const;
     bool isDirty() const;
     size_t presetCount() const;
     size_t currentIndex() const;
@@ -42,10 +51,13 @@ private:
     static std::array<double, kParamCount> defaultValues();
     static std::vector<Preset> makeFactoryPresets();
     bool applyPreset(const Preset& preset, size_t index);
+    bool writePresetFile(const std::filesystem::path& path, const Preset& preset) const;
+    Preset captureCurrentPreset(const std::filesystem::path& path, const std::string& name) const;
     static bool parsePreset(const std::string& text, Preset& preset);
     static std::string serializePreset(const Preset& preset);
     static std::string escapeJson(const std::string& value);
     static std::string readTextFile(const std::filesystem::path& path);
+    static bool samePath(const std::filesystem::path& a, const std::filesystem::path& b);
 
     ParameterStore& parameters_;
     mutable std::mutex mutex_;

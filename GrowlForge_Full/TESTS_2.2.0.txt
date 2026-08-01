@@ -1,0 +1,16 @@
+GrowlForge 2.2.0 validation
+
+PASS  Linux Release build
+PASS  Eight DSP regression scenarios bit-identical to the supplied 2.1.0 binary
+PASS  Auto-Gain / Bypass / linked Gate feature validation
+PASS  Workflow history: gesture snapshot, Undo, Redo
+PASS  A/B slot switching and A→B copy behavior
+PASS  Workflow state capture and restore
+PASS  Factory bank contains 16 presets
+PASS  User preset Save, overwrite, Load, Rename, and Delete
+PASS  Bypass remains excluded from .gfpreset files
+PASS  Version 11 project state loads with bit-identical audio
+PASS  Version 12 state round-trip produces identical audio
+
+Windows note:
+The Win32 GDI+ editor code was updated, but an MSVC/Windows SDK toolchain is not available in this Linux environment. Build it with build-windows.ps1 and report any compiler-specific diagnostics.

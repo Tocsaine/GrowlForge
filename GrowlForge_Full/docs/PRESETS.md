@@ -1,36 +1,41 @@
-# GrowlForge presets
+# GrowlForge presets — 2.2
 
 ## Factory bank
 
-GrowlForge 2.1 contains ten factory presets embedded in the plugin:
+GrowlForge 2.2 contains sixteen embedded factory presets. The original ten remain, plus six personal starting points:
 
-- Init
-- Controlled Fuzz
-- Modern Rhythm
-- Palm Weight
-- Post Amp Bite
-- Synth Growl
-- Crushed Bloom
-- Parallel Attack
-- Wide Open
-- Color x2
+- Tactile Crunch
+- Dense but Clear
+- Low String Clamp
+- Velvet Violence
+- Glass Teeth
+- Living Fuzz
 
 Use the left/right arrows to cycle presets. Click the preset name to open the complete preset menu.
 
-## User presets
+## User preset workflow
 
-The GUI provides `LOAD` and `SAVE` buttons. User presets use the `.gfpreset` extension and are stored by default in:
+`SAVE` now behaves intelligently:
+
+- a user preset is overwritten in place;
+- a factory preset or project state opens Save As.
+
+The preset menu also provides:
+
+- Save As;
+- Rename;
+- Delete;
+- Refresh preset list;
+- Open preset folder.
+
+Before loading another preset, GrowlForge asks whether modified settings should be saved, discarded, or kept by cancelling the operation.
+
+User presets use `.gfpreset` and are stored by default in:
 
 ```text
 %APPDATA%\GrowlForge\Presets
 ```
 
-A preset is a readable JSON document with stable parameter keys. Presets contain sound settings only. They do not contain:
+Preset writes use a temporary file and backup replacement so an interrupted overwrite does not silently destroy the previous preset.
 
-- Bypass;
-- momentary Apply Auto-Gain state;
-- meter values;
-- the temporary Auto-Gain correction;
-- GUI hover or animation state.
-
-The current preset name is shown in the top display. An asterisk means the sound has changed since that preset was loaded or saved.
+Presets contain sound settings only. They exclude Bypass, Apply Auto-Gain, meter values, temporary Auto-Gain correction, A/B workflow state, and GUI animation state.

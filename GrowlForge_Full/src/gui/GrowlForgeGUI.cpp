@@ -50,6 +50,12 @@ constexpr clap_id kPresetNext = 0xFFFFFFE2u;
 constexpr clap_id kPresetLoad = 0xFFFFFFE3u;
 constexpr clap_id kPresetSave = 0xFFFFFFE4u;
 constexpr clap_id kPresetMenu = 0xFFFFFFE5u;
+constexpr clap_id kUndo = 0xFFFFFFE6u;
+constexpr clap_id kRedo = 0xFFFFFFE7u;
+constexpr clap_id kSlotA = 0xFFFFFFE8u;
+constexpr clap_id kSlotB = 0xFFFFFFE9u;
+constexpr clap_id kCopyAToB = 0xFFFFFFEAu;
+constexpr clap_id kCopyBToA = 0xFFFFFFEBu;
 
 struct KnobDef {
  clap_id id;
@@ -296,6 +302,12 @@ const wchar_t* labelFor(clap_id id){
  if(id==kPresetLoad)return L"Load Preset";
  if(id==kPresetSave)return L"Save Preset";
  if(id==kPresetMenu)return L"Preset Browser";
+ if(id==kUndo)return L"Undo";
+ if(id==kRedo)return L"Redo";
+ if(id==kSlotA)return L"A";
+ if(id==kSlotB)return L"B";
+ if(id==kCopyAToB)return L"Copy A to B";
+ if(id==kCopyBToA)return L"Copy B to A";
  return L"Drive";
 }
 
@@ -508,7 +520,7 @@ void drawStaticUi(Graphics&g,GuiState*ui,float renderScale){
 
  fillRounded(g,ui,RectF(8.0f,8.0f,1184.0f,72.0f),9.0f,colorPanel2(),colorLine());
  drawText(g,ui,L"GROWLFORGE",RectF(30.0f,19.0f,280.0f,42.0f),31.0f,colorText(),FontStyleBold,StringAlignmentNear);
- drawText(g,ui,L"2.1",RectF(278.0f,26.0f,70.0f,26.0f),17.0f,colorOrange(),FontStyleBold,StringAlignmentNear);
+ drawText(g,ui,L"2.2",RectF(278.0f,26.0f,70.0f,26.0f),17.0f,colorOrange(),FontStyleBold,StringAlignmentNear);
  fillRounded(g,ui,RectF(390.0f,15.0f,380.0f,57.0f),7.0f,Color(255,8,10,12),Color(255,56,59,62));
 
  drawSection(g,ui,RectF(10.0f,90.0f,330.0f,360.0f),L"INPUT & FEEL",false);
@@ -526,7 +538,7 @@ void drawStaticUi(Graphics&g,GuiState*ui,float renderScale){
  fillRounded(g,ui,RectF(10.0f,634.0f,1180.0f,78.0f),7.0f,colorPanel2(),colorLine());
  drawStereoMeterStatic(g,ui,52.0f,665.0f,420.0f,false);
  drawStereoMeterStatic(g,ui,728.0f,665.0f,420.0f,true);
- drawText(g,ui,L"GROWLFORGE 2.1  •  CLAP",RectF(485.0f,653.0f,230.0f,26.0f),10.5f,Color(255,71,76,80),FontStyleBold);
+ drawText(g,ui,L"WORKFLOW",RectF(485.0f,640.0f,230.0f,16.0f),10.0f,Color(255,91,97,102),FontStyleBold);
 }
 
 clap_id activeDisplayId(const GuiState*ui){
@@ -552,7 +564,10 @@ void drawDynamicUi(Graphics&g,GuiState*ui,const RectF&dirty){
   const clap_id active=activeDisplayId(ui);
   wchar_t value[64]{};formatParam(ui->owner,active,value,64);
   const std::wstring preset=widenUtf8(ui->owner->presets.currentName());
-  drawText(g,ui,preset.c_str(),RectF(405.0f,16.0f,350.0f,15.0f),10.5f,colorMuted(),FontStyleBold);
+  const bool slotB=ui->owner->workflow.activeSlot()==1;
+  fillRounded(g,ui,RectF(405.0f,16.0f,22.0f,15.0f),4.0f,slotB?Color(255,24,54,57):Color(255,64,42,20),slotB?colorTeal():colorOrange());
+  drawText(g,ui,slotB?L"B":L"A",RectF(405.0f,16.0f,22.0f,15.0f),9.0f,slotB?colorTeal():colorOrange(),FontStyleBold);
+  drawText(g,ui,preset.c_str(),RectF(432.0f,16.0f,323.0f,15.0f),10.5f,colorMuted(),FontStyleBold);
   drawText(g,ui,labelFor(active),RectF(405.0f,29.0f,350.0f,15.0f),10.5f,active==Drive?colorOrange():colorTeal(),FontStyleBold);
   drawText(g,ui,value,RectF(405.0f,41.0f,350.0f,27.0f),20.0f,colorText(),FontStyleBold);
   if(ui->owner->parameters.values[Bypass].load()>=0.5)
@@ -576,6 +591,30 @@ void drawDynamicUi(Graphics&g,GuiState*ui,const RectF&dirty){
  if(rectIntersects(dirty,saveRect))drawHeaderButton(saveRect,L"SAVE",kPresetSave,false,false);
  if(rectIntersects(dirty,bypassRect))drawHeaderButton(bypassRect,L"BYPASS",Bypass,ui->owner->parameters.values[Bypass].load()>=0.5,true);
  if(rectIntersects(dirty,x2r))drawHeaderButton(x2r,L"×2 COLOR",X2,ui->owner->parameters.values[X2].load()>=0.5,true);
+
+ const RectF undoRect(488.0f,660.0f,32.0f,30.0f);
+ const RectF redoRect(524.0f,660.0f,32.0f,30.0f);
+ const RectF slotARect(562.0f,660.0f,30.0f,30.0f);
+ const RectF slotBRect(596.0f,660.0f,30.0f,30.0f);
+ const RectF copyABRect(632.0f,660.0f,38.0f,30.0f);
+ const RectF copyBARect(674.0f,660.0f,38.0f,30.0f);
+ auto drawWorkflowButton=[&](const RectF&r,const wchar_t*label,clap_id id,bool active,bool enabled){
+  const Color accent=active?colorOrange():colorTeal();
+  const Color border=!enabled?Color(255,48,52,55):((ui->hover==id||active)?accent:colorLine());
+  const Color fill=active?Color(255,58,38,19):Color(255,22,25,28);
+  fillRounded(g,ui,r,5.0f,fill,border);
+  drawText(g,ui,label,r,10.5f,enabled?(active?accent:colorText()):Color(255,76,81,85),FontStyleBold);
+ };
+ const RectF workflowRect(484.0f,656.0f,232.0f,38.0f);
+ if(rectIntersects(dirty,workflowRect)){
+  const uint32_t activeSlot=ui->owner->workflow.activeSlot();
+  drawWorkflowButton(undoRect,L"↶",kUndo,false,ui->owner->workflow.canUndo());
+  drawWorkflowButton(redoRect,L"↷",kRedo,false,ui->owner->workflow.canRedo());
+  drawWorkflowButton(slotARect,L"A",kSlotA,activeSlot==0,true);
+  drawWorkflowButton(slotBRect,L"B",kSlotB,activeSlot==1,true);
+  drawWorkflowButton(copyABRect,L"A→B",kCopyAToB,false,true);
+  drawWorkflowButton(copyBARect,L"B→A",kCopyBToA,false,true);
+ }
 
  for(const auto&k:kKnobs){
   if(rectIntersects(dirty,knobCircleRect(k)))drawKnobDynamic(g,ui,k);
@@ -662,6 +701,7 @@ void invalidateControl(GuiState*ui,clap_id id){
  if(id==X2){invalidateLogical(ui,RectF(1029.0f,19.0f,148.0f,49.0f),2.0f);return;}
  if(id==Bypass){invalidateLogical(ui,RectF(933.0f,21.0f,94.0f,45.0f),2.0f);invalidateDisplay(ui);return;}
  if(id==kPresetPrevious||id==kPresetNext||id==kPresetLoad||id==kPresetSave||id==kPresetMenu){invalidateLogical(ui,RectF(346.0f,20.0f,588.0f,48.0f),2.0f);invalidateDisplay(ui);return;}
+ if(id==kUndo||id==kRedo||id==kSlotA||id==kSlotB||id==kCopyAToB||id==kCopyBToA){invalidateLogical(ui,RectF(484.0f,656.0f,232.0f,38.0f),2.0f);invalidateDisplay(ui);return;}
  if(id==AutoGain){invalidateLogical(ui,RectF(868.0f,506.0f,108.0f,64.0f),2.0f);invalidateLogical(ui,RectF(870.0f,569.0f,104.0f,31.0f),2.0f);return;}
  if(id==ApplyAutoGain||id==AutoGainCorrection){invalidateLogical(ui,RectF(870.0f,569.0f,104.0f,31.0f),2.0f);return;}
 }
@@ -684,6 +724,12 @@ clap_id controlAt(float x,float y){
  if(inRect(x,y,RectF(1032.0f,22.0f,142.0f,43.0f)))return X2;
  if(inRect(x,y,RectF(881.0f,510.0f,82.0f,38.0f)))return AutoGain;
  if(inRect(x,y,RectF(873.0f,572.0f,98.0f,25.0f)))return ApplyAutoGain;
+ if(inRect(x,y,RectF(488.0f,660.0f,32.0f,30.0f)))return kUndo;
+ if(inRect(x,y,RectF(524.0f,660.0f,32.0f,30.0f)))return kRedo;
+ if(inRect(x,y,RectF(562.0f,660.0f,30.0f,30.0f)))return kSlotA;
+ if(inRect(x,y,RectF(596.0f,660.0f,30.0f,30.0f)))return kSlotB;
+ if(inRect(x,y,RectF(632.0f,660.0f,38.0f,30.0f)))return kCopyAToB;
+ if(inRect(x,y,RectF(674.0f,660.0f,38.0f,30.0f)))return kCopyBToA;
  return CLAP_INVALID_ID;
 }
 
@@ -781,56 +827,181 @@ void renderStaticLayer(GuiState*ui){
 
 
 
-bool showPresetMenu(GuiState*ui){
- if(!ui||!ui->hwnd)return false;
- const auto names=ui->owner->presets.presetNames();
- if(names.empty())return false;
- HMENU menu=CreatePopupMenu();if(!menu)return false;
- constexpr UINT kBase=2000;
- const size_t current=ui->owner->presets.currentIndex();
- for(size_t i=0;i<names.size();++i){
-  const std::wstring name=widenUtf8(names[i]);
-  AppendMenuW(menu,MF_STRING|(i==current?MF_CHECKED:0),kBase+(UINT)i,name.c_str());
- }
- POINT p{405,34};ClientToScreen(ui->hwnd,&p);
- const UINT command=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_LEFTALIGN|TPM_TOPALIGN|TPM_NONOTIFY,p.x,p.y,0,ui->hwnd,nullptr);
- DestroyMenu(menu);
- if(command>=kBase&&command<kBase+names.size()){
-  const bool selected=ui->owner->presets.selectIndex(command-kBase);
-  if(selected){resetSnapshots(ui);invalidateFull(ui);UpdateWindow(ui->hwnd);}return selected;
- }
- return false;
-}
-
-bool loadPresetDialog(GuiState*ui){
- if(!ui||!ui->hwnd)return false;
- std::error_code error;const auto directory=ui->owner->presets.userPresetDirectory();std::filesystem::create_directories(directory,error);
- std::wstring initial=directory.wstring();wchar_t file[4096]{};
- OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=ui->hwnd;
- dialog.lpstrFilter=L"GrowlForge Presets (*.gfpreset)\0*.gfpreset\0All Files (*.*)\0*.*\0\0";
- dialog.lpstrFile=file;dialog.nMaxFile=4096;dialog.lpstrInitialDir=initial.c_str();
- dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
- if(!GetOpenFileNameW(&dialog))return false;
- const bool loaded=ui->owner->presets.loadFile(std::filesystem::path(file));
- if(loaded){resetSnapshots(ui);invalidateFull(ui);UpdateWindow(ui->hwnd);}return loaded;
+void refreshWorkflowUi(GuiState*ui){
+ if(!ui)return;
+ resetSnapshots(ui);invalidateFull(ui);if(ui->hwnd)UpdateWindow(ui->hwnd);
 }
 
 bool savePresetDialog(GuiState*ui){
  if(!ui||!ui->hwnd)return false;
  std::error_code error;const auto directory=ui->owner->presets.userPresetDirectory();std::filesystem::create_directories(directory,error);
  std::wstring initial=directory.wstring();wchar_t file[4096]{};
- std::string suggestedName=ui->owner->presets.currentName();
- while(!suggestedName.empty()&&(suggestedName.back()=='*'||suggestedName.back()==' '))suggestedName.pop_back();
- const std::wstring suggested=widenUtf8(suggestedName);
- std::wcsncpy(file,suggested.c_str(),4095);
+ const std::wstring suggested=widenUtf8(ui->owner->presets.currentCleanName());
+ std::wcsncpy(file,suggested.c_str(),4095);file[4095]=L'\0';
  OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=ui->hwnd;
+ dialog.lpstrTitle=L"Save GrowlForge preset as";
  dialog.lpstrFilter=L"GrowlForge Presets (*.gfpreset)\0*.gfpreset\0\0";
  dialog.lpstrFile=file;dialog.nMaxFile=4096;dialog.lpstrInitialDir=initial.c_str();dialog.lpstrDefExt=L"gfpreset";
  dialog.Flags=OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
  if(!GetSaveFileNameW(&dialog))return false;
  std::filesystem::path path(file);if(path.extension()!=L".gfpreset")path.replace_extension(L".gfpreset");
  const bool saved=ui->owner->presets.saveFile(path,path.stem().string());
- if(saved){resetSnapshots(ui);invalidateFull(ui);UpdateWindow(ui->hwnd);}return saved;
+ if(!saved)MessageBoxW(ui->hwnd,L"The preset could not be saved.",L"GrowlForge",MB_OK|MB_ICONERROR);
+ if(saved)refreshWorkflowUi(ui);
+ return saved;
+}
+
+bool saveCurrentPresetSmart(GuiState*ui){
+ if(!ui)return false;
+ if(ui->owner->presets.currentIsUser()){
+  const bool saved=ui->owner->presets.saveCurrent();
+  if(!saved&&ui->hwnd)MessageBoxW(ui->hwnd,L"The current preset could not be saved.",L"GrowlForge",MB_OK|MB_ICONERROR);
+  if(saved)refreshWorkflowUi(ui);
+  return saved;
+ }
+ return savePresetDialog(ui);
+}
+
+bool confirmDirtyBeforeReplace(GuiState*ui){
+ if(!ui||!ui->owner->presets.isDirty())return true;
+ const std::wstring name=widenUtf8(ui->owner->presets.currentCleanName());
+ const std::wstring message=L"Save changes to \""+name+L"\" before loading another preset?";
+ const int result=MessageBoxW(ui->hwnd,message.c_str(),L"Unsaved GrowlForge preset",MB_YESNOCANCEL|MB_ICONWARNING);
+ if(result==IDCANCEL)return false;
+ if(result==IDYES)return saveCurrentPresetSmart(ui);
+ return result==IDNO;
+}
+
+bool applyPresetIndex(GuiState*ui,size_t index){
+ if(!ui)return false;
+ if(index==ui->owner->presets.currentIndex())return true;
+ if(!confirmDirtyBeforeReplace(ui))return false;
+ ui->owner->workflow.beginAction();
+ const bool selected=ui->owner->presets.selectIndex(index);
+ if(selected)ui->owner->workflow.commitAction();else ui->owner->workflow.cancelAction();
+ if(selected)refreshWorkflowUi(ui);
+ return selected;
+}
+
+bool selectPreviousPreset(GuiState*ui){
+ if(!ui)return false;
+ const size_t count=ui->owner->presets.presetCount();
+ if(count==0)return false;
+ const size_t current=ui->owner->presets.currentIndex();
+ const size_t target=current==0?count-1:current-1;
+ if(!confirmDirtyBeforeReplace(ui))return false;
+ ui->owner->workflow.beginAction();
+ const bool selected=ui->owner->presets.selectIndex(target);
+ if(selected)ui->owner->workflow.commitAction();else ui->owner->workflow.cancelAction();
+ if(selected)refreshWorkflowUi(ui);
+ return selected;
+}
+
+bool selectNextPreset(GuiState*ui){
+ if(!ui)return false;
+ const size_t count=ui->owner->presets.presetCount();
+ if(count==0)return false;
+ const size_t current=ui->owner->presets.currentIndex();
+ const size_t target=(current+1)%count;
+ if(!confirmDirtyBeforeReplace(ui))return false;
+ ui->owner->workflow.beginAction();
+ const bool selected=ui->owner->presets.selectIndex(target);
+ if(selected)ui->owner->workflow.commitAction();else ui->owner->workflow.cancelAction();
+ if(selected)refreshWorkflowUi(ui);
+ return selected;
+}
+
+bool loadPresetDialog(GuiState*ui){
+ if(!ui||!ui->hwnd||!confirmDirtyBeforeReplace(ui))return false;
+ std::error_code error;const auto directory=ui->owner->presets.userPresetDirectory();std::filesystem::create_directories(directory,error);
+ std::wstring initial=directory.wstring();wchar_t file[4096]{};
+ OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=ui->hwnd;
+ dialog.lpstrTitle=L"Load GrowlForge preset";
+ dialog.lpstrFilter=L"GrowlForge Presets (*.gfpreset)\0*.gfpreset\0All Files (*.*)\0*.*\0\0";
+ dialog.lpstrFile=file;dialog.nMaxFile=4096;dialog.lpstrInitialDir=initial.c_str();
+ dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+ if(!GetOpenFileNameW(&dialog))return false;
+ ui->owner->workflow.beginAction();
+ const bool loaded=ui->owner->presets.loadFile(std::filesystem::path(file));
+ if(loaded)ui->owner->workflow.commitAction();else ui->owner->workflow.cancelAction();
+ if(!loaded)MessageBoxW(ui->hwnd,L"The selected file is not a valid GrowlForge preset.",L"GrowlForge",MB_OK|MB_ICONERROR);
+ if(loaded)refreshWorkflowUi(ui);
+ return loaded;
+}
+
+bool renamePresetDialog(GuiState*ui){
+ if(!ui||!ui->hwnd||!ui->owner->presets.currentIsUser())return false;
+ if(ui->owner->presets.isDirty()){
+  const int result=MessageBoxW(ui->hwnd,L"Renaming will save the current edits into this preset first.",L"Rename preset",MB_OKCANCEL|MB_ICONINFORMATION);
+  if(result!=IDOK||!ui->owner->presets.saveCurrent())return false;
+ }
+ const auto oldPath=ui->owner->presets.currentPath();
+ std::wstring initial=oldPath.parent_path().wstring();wchar_t file[4096]{};
+ const std::wstring suggested=widenUtf8(ui->owner->presets.currentCleanName());
+ std::wcsncpy(file,suggested.c_str(),4095);file[4095]=L'\0';
+ OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=ui->hwnd;
+ dialog.lpstrTitle=L"Rename GrowlForge preset";
+ dialog.lpstrFilter=L"GrowlForge Presets (*.gfpreset)\0*.gfpreset\0\0";
+ dialog.lpstrFile=file;dialog.nMaxFile=4096;dialog.lpstrInitialDir=initial.c_str();dialog.lpstrDefExt=L"gfpreset";
+ dialog.Flags=OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+ if(!GetSaveFileNameW(&dialog))return false;
+ std::filesystem::path path(file);if(path.extension()!=L".gfpreset")path.replace_extension(L".gfpreset");
+ const bool renamed=ui->owner->presets.renameCurrent(path,path.stem().string());
+ if(!renamed)MessageBoxW(ui->hwnd,L"The preset could not be renamed. The target name may already exist.",L"GrowlForge",MB_OK|MB_ICONERROR);
+ if(renamed)refreshWorkflowUi(ui);
+ return renamed;
+}
+
+bool deleteCurrentPreset(GuiState*ui){
+ if(!ui||!ui->hwnd||!ui->owner->presets.currentIsUser())return false;
+ const std::wstring name=widenUtf8(ui->owner->presets.currentCleanName());
+ const std::wstring message=L"Delete the user preset \""+name+L"\"?\n\nThe current sound will remain loaded as Unsaved.";
+ if(MessageBoxW(ui->hwnd,message.c_str(),L"Delete GrowlForge preset",MB_YESNO|MB_ICONWARNING)!=IDYES)return false;
+ const bool deleted=ui->owner->presets.deleteCurrent();
+ if(!deleted)MessageBoxW(ui->hwnd,L"The preset file could not be deleted.",L"GrowlForge",MB_OK|MB_ICONERROR);
+ if(deleted)refreshWorkflowUi(ui);
+ return deleted;
+}
+
+void openPresetFolder(GuiState*ui){
+ if(!ui||!ui->hwnd)return;
+ std::error_code error;const auto directory=ui->owner->presets.userPresetDirectory();std::filesystem::create_directories(directory,error);
+ const std::wstring path=directory.wstring();ShellExecuteW(ui->hwnd,L"open",path.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
+}
+
+bool showPresetMenu(GuiState*ui){
+ if(!ui||!ui->hwnd)return false;
+ const auto names=ui->owner->presets.presetNames();
+ if(names.empty())return false;
+ HMENU menu=CreatePopupMenu();if(!menu)return false;
+ constexpr UINT kBase=2000;
+ constexpr UINT kSave=3100,kSaveAs=3101,kRename=3102,kDelete=3103,kRefresh=3104,kOpenFolder=3105;
+ const size_t current=ui->owner->presets.currentIndex();
+ for(size_t i=0;i<names.size();++i){
+  const std::wstring name=widenUtf8(names[i]);
+  AppendMenuW(menu,MF_STRING|(i==current?MF_CHECKED:0),kBase+(UINT)i,name.c_str());
+ }
+ AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
+ AppendMenuW(menu,MF_STRING,kSave,L"Save");
+ AppendMenuW(menu,MF_STRING,kSaveAs,L"Save As...");
+ AppendMenuW(menu,MF_STRING|(ui->owner->presets.currentIsUser()?0:MF_GRAYED),kRename,L"Rename...");
+ AppendMenuW(menu,MF_STRING|(ui->owner->presets.currentIsUser()?0:MF_GRAYED),kDelete,L"Delete");
+ AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
+ AppendMenuW(menu,MF_STRING,kRefresh,L"Refresh preset list");
+ AppendMenuW(menu,MF_STRING,kOpenFolder,L"Open preset folder");
+ POINT p{405,34};ClientToScreen(ui->hwnd,&p);
+ const UINT command=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_LEFTALIGN|TPM_TOPALIGN|TPM_NONOTIFY,p.x,p.y,0,ui->hwnd,nullptr);
+ DestroyMenu(menu);
+ if(command>=kBase&&command<kBase+names.size())return applyPresetIndex(ui,command-kBase);
+ switch(command){
+  case kSave:return saveCurrentPresetSmart(ui);
+  case kSaveAs:return savePresetDialog(ui);
+  case kRename:return renamePresetDialog(ui);
+  case kDelete:return deleteCurrentPreset(ui);
+  case kRefresh:ui->owner->presets.refresh();refreshWorkflowUi(ui);return true;
+  case kOpenFolder:openPresetFolder(ui);return true;
+  default:return false;
+ }
 }
 
 LRESULT CALLBACK windowProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
@@ -848,6 +1019,21 @@ LRESULT CALLBACK windowProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
   case WM_SETCURSOR:{
    POINT p{};GetCursorPos(&p);ScreenToClient(hwnd,&p);auto l=logicalPoint(ui,p.x,p.y);
    SetCursor(LoadCursorW(nullptr,controlAt(l.X,l.Y)!=CLAP_INVALID_ID?IDC_HAND:IDC_ARROW));return TRUE;
+  }
+  case WM_KEYDOWN:{
+   const bool control=(GetKeyState(VK_CONTROL)&0x8000)!=0;
+   const bool shift=(GetKeyState(VK_SHIFT)&0x8000)!=0;
+   if(control&&wp=='Z'){
+    const bool changed=shift?ui->owner->workflow.redo():ui->owner->workflow.undo();
+    if(changed){ui->owner->presets.markDirty();refreshWorkflowUi(ui);}return 0;
+   }
+   if(control&&wp=='Y'){
+    if(ui->owner->workflow.redo()){ui->owner->presets.markDirty();refreshWorkflowUi(ui);}return 0;
+   }
+   if(control&&wp=='S'){
+    if(shift)savePresetDialog(ui);else saveCurrentPresetSmart(ui);return 0;
+   }
+   break;
   }
   case WM_MOUSEMOVE:{
    if(!ui->trackingMouse){TRACKMOUSEEVENT tme{sizeof(tme),TME_LEAVE,hwnd,0};TrackMouseEvent(&tme);ui->trackingMouse=true;}
@@ -870,11 +1056,15 @@ LRESULT CALLBACK windowProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
    const clap_id old=ui->hover;ui->hover=id;if(old!=id)invalidateHoverTransition(ui,old,id);
    if(id==X2||id==AutoGain||id==Bypass){toggleParam(ui,id);return 0;}
    if(id==ApplyAutoGain){ui->owner->setGuiParameter(ApplyAutoGain,1.0);invalidateControl(ui,ApplyAutoGain);invalidateDisplay(ui);return 0;}
-   if(id==kPresetPrevious){ui->owner->presets.selectPrevious();resetSnapshots(ui);invalidateFull(ui);UpdateWindow(hwnd);return 0;}
-   if(id==kPresetNext){ui->owner->presets.selectNext();resetSnapshots(ui);invalidateFull(ui);UpdateWindow(hwnd);return 0;}
+   if(id==kPresetPrevious){selectPreviousPreset(ui);return 0;}
+   if(id==kPresetNext){selectNextPreset(ui);return 0;}
    if(id==kPresetMenu){showPresetMenu(ui);return 0;}
    if(id==kPresetLoad){loadPresetDialog(ui);return 0;}
-   if(id==kPresetSave){savePresetDialog(ui);return 0;}
+   if(id==kPresetSave){saveCurrentPresetSmart(ui);return 0;}
+   if(id==kUndo){if(ui->owner->workflow.undo()){ui->owner->presets.markDirty();refreshWorkflowUi(ui);}return 0;}
+   if(id==kRedo){if(ui->owner->workflow.redo()){ui->owner->presets.markDirty();refreshWorkflowUi(ui);}return 0;}
+   if(id==kSlotA||id==kSlotB){const uint32_t slot=id==kSlotB?1u:0u;if(ui->owner->workflow.switchToSlot(slot))ui->owner->presets.markDirty();refreshWorkflowUi(ui);return 0;}
+   if(id==kCopyAToB||id==kCopyBToA){const uint32_t source=id==kCopyAToB?0u:1u;const uint32_t destination=1u-source;const bool destinationActive=ui->owner->workflow.activeSlot()==destination;if(ui->owner->workflow.copySlot(source,destination)&&destinationActive)ui->owner->presets.markDirty();refreshWorkflowUi(ui);return 0;}
    if(id<kParamCount&&!isToggleParameter(id)){ui->drag=id;ui->dragStartY=GET_Y_LPARAM(lp);ui->dragStartValue=ui->owner->parameters.values[id].load();
     ui->owner->beginGuiGesture(id);SetCapture(hwnd);invalidateControl(ui,id);invalidateDisplay(ui);return 0;}
    return 0;
@@ -883,7 +1073,7 @@ LRESULT CALLBACK windowProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
    if(ui->drag!=CLAP_INVALID_ID){const clap_id id=ui->drag;ui->owner->endGuiGesture(id);ui->drag=CLAP_INVALID_ID;ReleaseCapture();invalidateControl(ui,id);invalidateDisplay(ui);}return 0;
   case WM_LBUTTONDBLCLK:{
    auto l=logicalPoint(ui,GET_X_LPARAM(lp),GET_Y_LPARAM(lp));const clap_id id=controlAt(l.X,l.Y);
-   if(id<kParamCount&&id!=ApplyAutoGain){ui->owner->beginGuiGesture(id);ui->owner->setGuiParameter(id,defs[id].def);ui->owner->endGuiGesture(id);invalidateControl(ui,id);invalidateDisplay(ui);}return 0;
+   if(id<kParamCount&&id!=ApplyAutoGain&&!isToggleParameter(id)){ui->owner->beginGuiGesture(id);ui->owner->setGuiParameter(id,defs[id].def);ui->owner->endGuiGesture(id);invalidateControl(ui,id);invalidateDisplay(ui);}return 0;
   }
   case WM_MOUSEWHEEL:{
    POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(hwnd,&p);auto l=logicalPoint(ui,p.x,p.y);const clap_id id=controlAt(l.X,l.Y);
@@ -942,7 +1132,7 @@ void globalShutdown(){
 
 bool createWindow(GuiState*ui,HWND parent){
  if(!ui||!parent)return false;if(ui->hwnd)return true;ui->parent=parent;
- ui->hwnd=CreateWindowExW(0,kWindowClass,L"GrowlForge 2.0",WS_CHILD|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
+ ui->hwnd=CreateWindowExW(0,kWindowClass,L"GrowlForge 2.2",WS_CHILD|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
                           0,0,(int)ui->width,(int)ui->height,parent,nullptr,gModule,ui);
  return ui->hwnd!=nullptr;
 }
